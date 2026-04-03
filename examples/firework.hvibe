@@ -1,0 +1,52 @@
+{
+  hvibe_version: "0.1.0",
+  app: "firework",
+  description: `a simple firework simulation in the browser`,
+  stack: [`javascript`],
+
+  catalog: {
+    logic: {
+      particle_easing: `quadratic easing curve applied to particle velocity over lifetime`,
+      rocket_arc: `linear interpolation from bottom center to a random point in the upper half`,
+      explosion_trigger: `if rocket.position equals rocket.target then trigger explosion`
+    },
+    code: {
+      animation_loop: `
+        function loop(timestamp) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          update(timestamp);
+          requestAnimationFrame(loop);
+        }
+        requestAnimationFrame(loop);
+      `
+    }
+  },
+
+  features: {
+    generation: {
+      description: `generate a rocket at the bottom center of the screen`,
+      inputs: [`on click`, `on touch`],
+      blueprints: ["catalog.logic.rocket_arc", `max 10 simultaneous rockets`]
+    },
+    motion: {
+      description: `rocket rises from bottom to a random height`,
+      inputs: [`triggered by generation`],
+      blueprints: ["catalog.code.animation_loop"]
+    },
+    explosion: {
+      description: `explode the rocket into particles when it reaches its target height`,
+      inputs: [`triggered by motion`],
+      depends_on: [
+        {
+          feature: `motion`,
+          when: [`rocket has reached target height`]
+        }
+      ],
+      blueprints: [
+        "catalog.logic.particle_easing",
+        `catalog.logic.explosion_trigger`,
+        `80 particles per explosion, spread 360 degrees`
+      ]
+    }
+  }
+}

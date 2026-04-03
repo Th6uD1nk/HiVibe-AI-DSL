@@ -127,10 +127,19 @@ features: {
 │       ├── front: [`tech`, `tech`]
 │       ├── back:  [`tech`, `tech`]
 │       └── db:    [`tech`]
+├── catalog
+│   ├── logic:
+│   │   └── logic_name: `description or condition`
+│   └── code:
+│       └── code_name: `literal code`
 └── features
     ├── feature_name
     │   ├── description
-    │   └── inputs: [`trigger`, `trigger`]
+    │   ├── inputs: [`trigger`, `trigger`]
+    │   ├── blueprints: [`catalog_ref`, `llm instruction`]
+    │   └── depends_on:
+    │       ├── feature: `feature_name`
+    │       └── when: [`condition`, `condition`]
     └── feature_name
         ├── description
         └── inputs: [`trigger`]
