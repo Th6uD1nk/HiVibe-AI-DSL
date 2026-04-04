@@ -12,8 +12,6 @@ We have entered the era of AI, powerful tools that are profoundly transforming h
 
 HighVibe is a high-level, structured and maintainable Domain Specific Language for vibe coding, based on JSON.
 
-A `.hvibe` file is based on JavaScript object notation, without being strictly JSON nor JavaScript. This distinction is intentional and meaningful.
-
 Its purpose is to:
 - **Organize** a vibe coding project in a human-readable and LLM-readable format
 - **Maintain** the project over time, regardless of who (or what) reads it next
@@ -22,7 +20,7 @@ Its purpose is to:
 
 ## Format
 
-A `.hvibe` file is designed to be a **JavaScript object notation** (not strict JSON). This distinction is intentional and meaningful.
+A `.hvibe` file is based on JavaScript object notation, without being strictly JSON nor JavaScript. This distinction is intentional and meaningful.
 
 ### String conventions
 
@@ -56,7 +54,7 @@ description: `a simple firework simulation in the browser`, // direct: LLM instr
 
 ### `stack`
 
-Can be a flat array when the stack is simple, or a keyed object when the project has distinct layers. All values inside `stack` are LLM-direct (backtick strings) — primary constraints the LLM must respect when generating code.
+Can be a flat array when the stack is simple, or a keyed object when the project has distinct layers.
 
 ```js
 // Flat
@@ -69,6 +67,8 @@ stack: {
   db:    [`sqlite`]
 }
 ```
+
+All values inside `stack` are LLM-direct (backtick strings). They are primary constraints the LLM must respect when generating code.
 
 ### `catalog`
 
