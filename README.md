@@ -1,16 +1,223 @@
-# HighVibe+
+# HighVibe
+
+**Version:** 0.1.0 | **File extension:** `.hvibe` | **Status:** Draft
 
 An attempt to establish a high-level, structured and maintainable Domain Specific Language for vibe coding, based on JSON.
 
 ## Motivation
 
-We have entered the era of AI, powerful tools that are profoundly transforming how we build software. Yet AI still struggles to truly grasp our intentions: without clear directives, it tends to produce generic, naive or suboptimal code. On a large codebase, it often loses the thread of conceptual analysis. It cannot feel a need, nor maintain focus on resolving a human necessity, nor on implementing a solution that truly addresses it. The situation is even worse when the developer themselves loses the thread. This is why HighVibe+ exists: to provide a framework for maintaining, organizing and refining vibe coding projects over time.
+We have entered the era of AI, powerful tools that are profoundly transforming how we build software. Yet AI still struggles to truly grasp our intentions: without clear directives, it tends to produce generic, naive or suboptimal code. On a large codebase, it often loses the thread of conceptual analysis. It cannot feel a need, nor maintain focus on resolving a human necessity, nor on implementing a solution that truly addresses it. The situation is even worse when the developer themselves loses the thread. This is why HighVibe exists: to provide a framework for maintaining, organizing and refining vibe coding projects over time.
 
-## Learn More (Specification)
+## Overview
 
-Please check the [SPEC.md](./SPEC.md) for more information.
+HighVibe is a high-level, structured and maintainable Domain Specific Language for vibe coding, based on JSON.
 
-## Experimental System Prompt Starter Usage
+A `.hvibe` file is based on JavaScript object notation, without being strictly JSON nor JavaScript. This distinction is intentional and meaningful.
+
+Its purpose is to:
+- **Organize** a vibe coding project in a human-readable and LLM-readable format
+- **Maintain** the project over time, regardless of who (or what) reads it next
+- **Extend** the project with new features without losing context
+- **Modularize** the project by splitting concerns into discrete, named units
+
+## Format
+
+A `.hvibe` file is designed to be a **JavaScript object notation** (not strict JSON). This distinction is intentional and meaningful.
+
+### String conventions
+
+HighVibe defines two classes of strings with distinct delimiters:
+
+| Delimiter | Type | Priority | Description |
+|-----------|------|----------|-------------|
+| `` ` ` `` | **LLM-direct** | High | Content the LLM must treat as a primary instruction. These strings are authoritative and should be interpreted literally and faithfully. |
+| `" "` | **LLM-indirect** | Normal | Content intended primarily for developers or parsers/validators. The LLM should not ignore these strings, but they are not primary instructions. |
+
+**Object keys are never quoted.** Keys belong to the HighVibe schema and carry structural meaning defined by this specification. The LLM and/or HighVibe interpreters are expected to be aware of it.
+
+```js
+// Example of the convention in practice
+app: "firework",                                             // indirect: identifier for tooling
+description: `a simple firework simulation in the browser`, // direct: LLM instruction
+```
+
+## Schema
+
+### Top-level fields
+
+| Field | Required | Type | Description |
+|-------|:--------:|------|-------------|
+| `hvibe_version` | ✓ | `string` | HighVibe spec version this file targets (e.g. `"0.1.0"`) |
+| `app` | ✓ | `string` | The name of the application |
+| `description` | ✓ | `` `string` `` | A natural language description of the app. LLM-direct. |
+| `stack` | ✓ | `array` or `object` | Technologies used. See below. |
+| `features` | ✓ | `object` | Named feature definitions. See below. |
+| `catalog` | | `object` | Reusable logic and code references. Optional. See below. |
+
+### `stack`
+
+Can be a flat array when the stack is simple, or a keyed object when the project has distinct layers. All values inside `stack` are LLM-direct (backtick strings) — primary constraints the LLM must respect when generating code.
+
+```js
+// Flat
+stack: [`javascript`]
+
+// Layered
+stack: {
+  front: [`react`, `tailwind`],
+  back:  [`node`, `express`],
+  db:    [`sqlite`]
+}
+```
+
+### `catalog`
+
+An optional top-level object that stores reusable references. Catalog entries are referenced in `blueprints` using their dot-path (e.g. `"catalog.logic.rocket_arc"`). All values are LLM-direct.
+
+| Field | Required | Type | Description |
+|-------|:--------:|------|-------------|
+| `logic` | | `object` | Named logic entries: algorithms, rules, conditions expressed in natural language. |
+| `code` | | `object` | Named code entries: literal code snippets the LLM must use as-is or as close reference. |
+
+```js
+catalog: {
+  logic: {
+    rocket_arc:        `linear interpolation from bottom center to a random point in the upper half`,
+    particle_easing:   `quadratic easing curve applied to particle velocity over lifetime`,
+    explosion_trigger: `if rocket.position equals rocket.target then trigger explosion`
+  },
+  code: {
+    animation_loop: `
+      function loop(timestamp) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        update(timestamp);
+        requestAnimationFrame(loop);
+      }
+      requestAnimationFrame(loop);
+    `
+  }
+}
+```
+
+### `features`
+
+An object where each key is the **name of a feature**. Feature names are unquoted (schema keys).
+
+| Field | Required | Type | Description |
+|-------|:--------:|------|-------------|
+| `description` | ✓ | `` `string` `` | What the feature does. LLM-direct. |
+| `inputs` | ✓ | `array` | What triggers or feeds the feature. LLM-direct strings. |
+| `blueprints` | | `array` | Implementation hints. Either a catalog dot-path (`"catalog.logic.name"`) or a direct LLM instruction in backticks. |
+| `depends_on` | | `array` | List of dependency objects. See below. |
+
+#### `depends_on`
+
+Each entry is an object with the following fields:
+
+| Field | Required | Type | Description |
+|-------|:--------:|------|-------------|
+| `feature` | ✓ | `` `string` `` | The name of the feature this one depends on. LLM-direct. |
+| `when` | | `array` | Conditions under which the dependency applies. LLM-direct strings. |
+
+```js
+features: {
+  generation: {
+    description: `generate a rocket at the bottom center of the screen`,
+    inputs: [`on click`, `on touch`],
+    blueprints: ["catalog.logic.rocket_arc", `max 10 simultaneous rockets`]
+  },
+  motion: {
+    description: `rocket rises from bottom to a random height`,
+    inputs: [`triggered by generation`],
+    blueprints: ["catalog.code.animation_loop"]
+  },
+  explosion: {
+    description: `explode the rocket into particles when it reaches its target height`,
+    inputs: [`triggered by motion`],
+    depends_on: [
+      {
+        feature: `motion`,
+        when: [`rocket has reached target height`]
+      }
+    ],
+    blueprints: [
+      "catalog.logic.particle_easing",
+      "catalog.logic.explosion_trigger",
+      `80 particles per explosion, spread 360 degrees`
+    ]
+  }
+}
+```
+
+## Minimal valid `.hvibe` file
+
+```js
+{
+  hvibe_version: "0.1.0",
+  app: "my-app",
+  description: `what this app does`,
+  stack: [`javascript`],
+  features: {
+    core: {
+      description: `the main feature of the app`,
+      inputs: [`user interaction`]
+    }
+  }
+}
+```
+
+## Structure tree
+
+See [tree.html](https://htmlpreview.github.io/?https://github.com/Th6uD1nk/HighVibe/blob/main/tree.html) for the interactive version.
+
+```
+.hvibe
+├── hvibe_version
+├── app
+├── description
+├── stack
+│   ├── flat:    [`tech`, `tech`]
+│   └── layered:
+│       ├── front: [`tech`, `tech`]
+│       ├── back:  [`tech`, `tech`]
+│       └── db:    [`tech`]
+├── catalog (optional)
+│   ├── logic:
+│   │   └── logic_name: `description or condition`
+│   └── code:
+│       └── code_name: `literal code`
+└── features
+    ├── feature_name
+    │   ├── description
+    │   ├── inputs: [`trigger`, `trigger`]
+    │   ├── blueprints: ["catalog.logic.name", `llm instruction`]
+    │   └── depends_on:
+    │       ├── feature: `feature_name`
+    │       └── when: [`condition`, `condition`]
+    └── feature_name
+        ├── description
+        └── inputs: [`trigger`]
+```
+
+## Design principles
+
+- **Keys are schema.** Unquoted keys belong to the HighVibe schema. They are structural, not instructional.
+- **Quoted strings are content.** Double-quoted strings carry developer-facing or tooling-facing information. The LLM reads them but does not treat them as primary instructions.
+- **Backtick strings are instructions.** Backtick strings are direct contracts with the LLM. They must be interpreted literally and faithfully, and take priority over all other content.
+- **Features are the unit of modularity.** Each feature is a self-contained, describable and extensible unit. Features may declare dependencies on other features, the exact mechanism is reserved for a future version of this spec.
+- **The file is the project memory.** A `.hvibe` file should contain enough context to reconstruct or extend the project without additional documentation.
+
+## Versioning
+
+The `hvibe_version` field must be present in every file. It refers to the version of the HighVibe specification the file is written against, not the version of the app itself.
+
+Current version: `0.1.0`
+
+*HighVibe is an open specification. Contributions and discussions are welcome.*
+
+See `specs` for other versions.
+
+## Experimental system prompt starter usage
 
 Copy the content of `system-prompt.txt` into your LLM chat as a system prompt, then provide your `.hvibe` file.
 
