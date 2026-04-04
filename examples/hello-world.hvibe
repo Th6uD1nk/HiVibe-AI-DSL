@@ -1,0 +1,19 @@
+{
+  hvibe_version: "0.1.0",
+  app: "hello_world",
+  description: `hello world`,
+  stack: [`any`],
+
+  catalog: {
+    data: {
+      text: "Hello World!",
+    },
+  },
+
+  features: {
+    display: {
+      description: `print a simple ascii hello world`,
+      blueprints: ["catalog.data.text"]
+    },
+  }
+}
