@@ -45,11 +45,12 @@ description: `a simple firework simulation in the browser`, // direct: LLM instr
 
 | Field | Required | Type | Description |
 |-------|:--------:|------|-------------|
+| `hvibe_version` | √ | `string` | HighVibe+ spec version this file targets (e.g. `"0.1.0"`) |
 | `app` | √ | `string` | The name of the application |
 | `description` | √ | `` `string` `` | A natural language description of the app. LLM-direct. |
 | `stack` | √ | `array` or `object` | Technologies used. See below. |
 | `features` | √ | `object` | Named feature definitions. See below. |
-| `hvibe_version` | √ | `string` | HighVibe+ spec version this file targets (e.g. `"0.1.0"`) |
+| `catalog` | | `object` | Reusable logic and code references. Optional. See below. |
 
 
 ### `stack`
@@ -71,6 +72,36 @@ stack: {
 All values inside `stack` are LLM-direct (backtick strings). They are primary constraints the LLM must respect when generating code.
 
 
+### `catalog`
+
+An optional top-level object that stores reusable references. Catalog entries are referenced in `blueprints` using their dot-path (e.g. `"catalog.logic.rocket_arc"`). Catalog keys are schema keys (unquoted). All values are LLM-direct.
+
+| Field | Required | Type | Description |
+|-------|:--------:|------|-------------|
+| `logic` | | `object` | Named logic entries: algorithms, rules, conditions expressed in natural language. LLM-direct. |
+| `code` | | `object` | Named code entries: literal code snippets the LLM must use as-is or as close reference. LLM-direct. |
+
+```js
+catalog: {
+  logic: {
+    rocket_arc:        `linear interpolation from bottom center to a random point in the upper half`,
+    particle_easing:   `quadratic easing curve applied to particle velocity over lifetime`,
+    explosion_trigger: `if rocket.position equals rocket.target then trigger explosion`
+  },
+  code: {
+    animation_loop: `
+      function loop(timestamp) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        update(timestamp);
+        requestAnimationFrame(loop);
+      }
+      requestAnimationFrame(loop);
+    `
+  }
+}
+```
+
+
 ### `features`
 
 An object where each key is the **name of a feature**. Feature names are unquoted (schema keys).
@@ -81,16 +112,44 @@ Each feature has the following fields:
 |-------|:--------:|------|-------------|
 | `description` | √ | `` `string` `` | What the feature does. LLM-direct. |
 | `inputs` | √ | `array` | What triggers or feeds the feature. LLM-direct strings. |
+| `blueprints` | | `array` | Implementation hints. Either a catalog dot-path (`"catalog.logic.name"`) or a direct LLM instruction in backticks. |
+| `depends_on` | | `array` | List of dependency objects. See below. |
+
+#### `depends_on`
+
+Each entry in `depends_on` is an object with the following fields:
+
+| Field | Required | Type | Description |
+|-------|:--------:|------|-------------|
+| `feature` | √ | `` `string` `` | The name of the feature this one depends on. LLM-direct. |
+| `when` | | `array` | Conditions under which the dependency applies. LLM-direct strings. |
 
 ```js
 features: {
   generation: {
-    description: `generate a firework at the bottom center of the screen`,
-    inputs: [`on click`, `on touch`]
+    description: `generate a rocket at the bottom center of the screen`,
+    inputs: [`on click`, `on touch`],
+    blueprints: ["catalog.logic.rocket_arc", `max 10 simultaneous rockets`]
   },
   motion: {
-    description: `rocket rises from bottom to a random height then explodes into particles`,
-    inputs: [`triggered by generation`]
+    description: `rocket rises from bottom to a random height`,
+    inputs: [`triggered by generation`],
+    blueprints: ["catalog.code.animation_loop"]
+  },
+  explosion: {
+    description: `explode the rocket into particles when it reaches its target height`,
+    inputs: [`triggered by motion`],
+    depends_on: [
+      {
+        feature: `motion`,
+        when: [`rocket has reached target height`]
+      }
+    ],
+    blueprints: [
+      "catalog.logic.particle_easing",
+      "catalog.logic.explosion_trigger",
+      `80 particles per explosion, spread 360 degrees`
+    ]
   }
 }
 ```
@@ -116,6 +175,8 @@ features: {
 
 ## Structure tree
 
+See [tree.html](./tree.html) for the interactive version.
+
 ```
 .hvibe
 ├── hvibe_version
@@ -127,7 +188,7 @@ features: {
 │       ├── front: [`tech`, `tech`]
 │       ├── back:  [`tech`, `tech`]
 │       └── db:    [`tech`]
-├── catalog
+├── catalog (optional)
 │   ├── logic:
 │   │   └── logic_name: `description or condition`
 │   └── code:
@@ -136,7 +197,7 @@ features: {
     ├── feature_name
     │   ├── description
     │   ├── inputs: [`trigger`, `trigger`]
-    │   ├── blueprints: [`catalog_ref`, `llm instruction`]
+    │   ├── blueprints: ["catalog.logic.name", `llm instruction`]
     │   └── depends_on:
     │       ├── feature: `feature_name`
     │       └── when: [`condition`, `condition`]

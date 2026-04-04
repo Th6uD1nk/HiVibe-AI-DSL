@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HighVibe+ Structure Tree</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0e0e0e;
+      color: #d4d4d4;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      padding: 40px;
+      min-height: 100vh;
+    }
+
+    header {
+      margin-bottom: 36px;
+      border-bottom: 1px solid #2a2a2a;
+      padding-bottom: 16px;
+    }
+
+    header h1 {
+      font-size: 20px;
+      font-weight: normal;
+      color: #f0f0f0;
+      letter-spacing: 0.05em;
+    }
+
+    header h1 span {
+      color: #7ee8a2;
+    }
+
+    header p {
+      font-size: 12px;
+      color: #555;
+      margin-top: 6px;
+    }
+
+    .tree {
+      line-height: 1.9;
+      user-select: none;
+    }
+
+    details {
+      margin-left: 0;
+    }
+
+    details > details,
+    details > .leaf {
+      margin-left: 22px;
+    }
+
+    summary {
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      transition: background 0.1s;
+    }
+
+    summary:hover {
+      background: #1a1a1a;
+    }
+
+    summary::before {
+      content: '▸';
+      font-size: 10px;
+      color: #444;
+      transition: transform 0.15s;
+      min-width: 10px;
+    }
+
+    details[open] > summary::before {
+      transform: rotate(90deg);
+    }
+
+    .leaf {
+      padding: 2px 6px 2px 28px;
+      color: #888;
+    }
+
+    .key {
+      color: #79b8ff;
+    }
+
+    .required {
+      font-size: 11px;
+      color: #7ee8a2;
+      margin-left: 4px;
+    }
+
+    .optional {
+      font-size: 11px;
+      color: #555;
+      margin-left: 4px;
+    }
+
+    .type {
+      font-size: 11px;
+      color: #c792ea;
+      margin-left: 6px;
+    }
+
+    .llm-direct {
+      font-size: 11px;
+      color: #e8c07e;
+      margin-left: 6px;
+    }
+
+    .value {
+      color: #98c379;
+      font-style: italic;
+    }
+
+    .connector {
+      color: #333;
+      margin-right: 2px;
+    }
+
+    .toggle-all {
+      margin-bottom: 24px;
+      display: flex;
+      gap: 12px;
+    }
+
+    button {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      color: #888;
+      padding: 4px 14px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      cursor: pointer;
+      border-radius: 3px;
+      transition: all 0.1s;
+    }
+
+    button:hover {
+      border-color: #7ee8a2;
+      color: #7ee8a2;
+    }
+
+    .legend {
+      margin-top: 40px;
+      border-top: 1px solid #1a1a1a;
+      padding-top: 16px;
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>HighVibe<span>+</span> — Structure Tree</h1>
+  <p>v0.1.0 — interactive reference</p>
+</header>
+
+<div class="toggle-all">
+  <button onclick="expandAll()">expand all</button>
+  <button onclick="collapseAll()">collapse all</button>
+</div>
+
+<div class="tree">
+
+  <details open>
+    <summary><span class="key">.hvibe</span></summary>
+
+    <div class="leaf"><span class="connector">├──</span> <span class="key">hvibe_version</span> <span class="required">√ required</span> <span class="type">string</span></div>
+    <div class="leaf"><span class="connector">├──</span> <span class="key">app</span> <span class="required">√ required</span> <span class="type">string</span></div>
+    <div class="leaf"><span class="connector">├──</span> <span class="key">description</span> <span class="required">√ required</span> <span class="type">`string`</span> <span class="llm-direct">LLM-direct</span></div>
+
+    <details open>
+      <summary><span class="connector">├──</span> <span class="key">stack</span> <span class="required">√ required</span> <span class="type">array | object</span></summary>
+      <details open>
+        <summary><span class="connector">├──</span> flat</summary>
+        <div class="leaf"><span class="value">[`tech`, `tech`]</span></div>
+      </details>
+      <details open>
+        <summary><span class="connector">└──</span> layered</summary>
+        <div class="leaf"><span class="connector">├──</span> <span class="key">front</span> <span class="value">[`tech`, `tech`]</span></div>
+        <div class="leaf"><span class="connector">├──</span> <span class="key">back</span> <span class="value">[`tech`, `tech`]</span></div>
+        <div class="leaf"><span class="connector">└──</span> <span class="key">db</span> <span class="value">[`tech`]</span></div>
+      </details>
+    </details>
+
+    <details open>
+      <summary><span class="connector">├──</span> <span class="key">catalog</span> <span class="optional">optional</span></summary>
+      <details open>
+        <summary><span class="connector">├──</span> <span class="key">logic</span></summary>
+        <div class="leaf"><span class="connector">└──</span> <span class="key">logic_name</span> <span class="value">`description or condition`</span> <span class="llm-direct">LLM-direct</span></div>
+      </details>
+      <details open>
+        <summary><span class="connector">└──</span> <span class="key">code</span></summary>
+        <div class="leaf"><span class="connector">└──</span> <span class="key">code_name</span> <span class="value">`literal code`</span> <span class="llm-direct">LLM-direct</span></div>
+      </details>
+    </details>
+
+    <details open>
+      <summary><span class="connector">└──</span> <span class="key">features</span> <span class="required">√ required</span></summary>
+
+      <details open>
+        <summary><span class="connector">├──</span> <span class="key">feature_name</span></summary>
+        <div class="leaf"><span class="connector">├──</span> <span class="key">description</span> <span class="required">√ required</span> <span class="type">`string`</span> <span class="llm-direct">LLM-direct</span></div>
+        <div class="leaf"><span class="connector">├──</span> <span class="key">inputs</span> <span class="required">√ required</span> <span class="value">[`trigger`, `trigger`]</span> <span class="llm-direct">LLM-direct</span></div>
+        <div class="leaf"><span class="connector">├──</span> <span class="key">blueprints</span> <span class="optional">optional</span> <span class="value">["catalog.logic.name", `llm instruction`]</span></div>
+        <details open>
+          <summary><span class="connector">└──</span> <span class="key">depends_on</span> <span class="optional">optional</span></summary>
+          <div class="leaf"><span class="connector">├──</span> <span class="key">feature</span> <span class="value">`feature_name`</span> <span class="llm-direct">LLM-direct</span></div>
+          <div class="leaf"><span class="connector">└──</span> <span class="key">when</span> <span class="value">[`condition`, `condition`]</span> <span class="llm-direct">LLM-direct</span></div>
+        </details>
+      </details>
+
+      <details open>
+        <summary><span class="connector">└──</span> <span class="key">feature_name</span></summary>
+        <div class="leaf"><span class="connector">├──</span> <span class="key">description</span> <span class="required">√ required</span> <span class="type">`string`</span> <span class="llm-direct">LLM-direct</span></div>
+        <div class="leaf"><span class="connector">└──</span> <span class="key">inputs</span> <span class="required">√ required</span> <span class="value">[`trigger`]</span> <span class="llm-direct">LLM-direct</span></div>
+      </details>
+
+    </details>
+
+  </details>
+
+</div>
+
+<div class="legend">
+  <div class="legend-item"><span class="required">√</span> required field</div>
+  <div class="legend-item"><span class="optional">optional</span> optional field</div>
+  <div class="legend-item"><span class="llm-direct">LLM-direct</span> backtick string, primary instruction</div>
+  <div class="legend-item"><span class="type">type</span> value type</div>
+  <div class="legend-item"><span class="value">value</span> example value</div>
+</div>
+
+<script>
+  function expandAll() {
+    document.querySelectorAll('details').forEach(d => d.open = true);
+  }
+  function collapseAll() {
+    document.querySelectorAll('details').forEach(d => d.open = false);
+  }
+</script>
+
+</body>
+</html>
