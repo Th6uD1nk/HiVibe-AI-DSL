@@ -10,5 +10,8 @@ We have entered the era of AI, powerful tools that are profoundly transforming h
 
 Please check the [SPEC.md](./SPEC.md) for more information.
 
-`Th6uD1nk`
+## Experimental System Prompt Starter Usage
 
+Copy the content of `system-prompt.txt` into your LLM chat as a system prompt, then provide your `.hvibe` file.
+
+`Th6uD1nk`
