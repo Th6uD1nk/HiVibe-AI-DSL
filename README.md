@@ -6,7 +6,7 @@ An attempt to establish a high-level, structured and maintainable Domain Specifi
 
 ## Motivation
 
-We have entered the era of AI, powerful tools that are profoundly transforming how we build software. Yet AI still struggles to truly grasp our intentions: without clear directives, it tends to produce generic, naive or suboptimal code. On a large codebase, it often loses the thread of conceptual analysis. It cannot feel a need, nor maintain focus on resolving a human necessity, nor on implementing a solution that truly addresses it. The situation is even worse when the developer themselves loses the thread. This is why HighVibe exists: to provide a framework for maintaining, organizing and refining vibe coding projects over time.
+We have entered the era of AI, powerful tools that are profoundly transforming how we build software. Yet without clear directives, AI can still struggle to fully grasp our intentions, often producing generic, naive, or suboptimal code that is hard to maintain on large projects. In AI-driven and vibe coding projects, the greatest challenge is not just creating, but preserving intention and coherence over time. HighVibe aims to provide a structured and modular format that makes a project readable, maintainable, and easily extensible, whether for a developer or an AI model. Each feature is isolated and described, every dependency is explicit, and the entire project can be understood, extended, or reorganized without losing its meaning.
 
 ## Overview
 
