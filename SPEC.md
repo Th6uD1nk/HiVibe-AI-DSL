@@ -8,7 +8,7 @@
 
 HighVibe+ is a high-level, structured and maintainable Domain Specific Language for vibe coding, based on JSON.
 
-A `.hvibe` file aims to be a single source of truth for a vibe-coded module or project.  
+A `.hvibe` file is based on JavaScript object notation, without being strictly JSON nor JavaScript. This distinction is intentional and meaningful.
 
 Its purpose is to:
 - **Organize** a vibe coding project in a human-readable and LLM-readable format
