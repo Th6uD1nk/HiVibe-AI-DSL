@@ -3,11 +3,10 @@
   app: "firework",
   description: `a simple firework simulation in the browser`,
   stack: [`javascript`],
-
   catalog: {
     logic: {
-      particle_easing: `quadratic easing curve applied to particle velocity over lifetime`,
-      rocket_arc:      `linear interpolation from bottom center to a random point in the upper half`,
+      particle_easing:   `quadratic easing curve applied to particle velocity over lifetime`,
+      rocket_arc:        `linear interpolation from the bottom of the screen at the x position of the click to a random point in the upper half`,
       explosion_trigger: `if rocket.position equals rocket.target then trigger explosion`
     },
     code: {
@@ -22,8 +21,9 @@
     },
     rules: {
       obligations: {
-        explosion: `MUST BE disk-shaped, growing and then explode to particles`,
-        limit:     `MUST ALWAYS stay inside the visible screen area, OTHERWISE explode before reaching screen boundary`
+        explosion:      `MUST BE disk-shaped, growing and then explode to particles`,
+        limit:          `MUST ALWAYS stay inside the visible screen area, OTHERWISE explode before reaching screen boundary`,
+        click_position: `MUST ALWAYS be generated at the bottom of the screen at the exact x position of the click or touch input`
       },
       constraints: {
         step:       `MUST ALWAYS apply a step of no more than 10 per increment`,
@@ -31,7 +31,7 @@
       }
     },
     tests: {
-      generatePosition: `given a click at any point on the screen, the rocket MUST ALWAYS be generated at the bottom center regardless of click position`,
+      generatePosition: `given a click or touch at any x position, the rocket MUST ALWAYS be generated at the bottom of the screen at that exact x position`,
       generateLimit:    `given 10 rockets already active, a new click MUST NEVER generate an 11th rocket`,
       motionUpward:     `verify the motion is always upward, the rocket MUST NEVER move sideways or downward`,
       motionDirection:  `given a rocket in motion, its y position MUST ALWAYS strictly decrease at every step`,
@@ -41,12 +41,12 @@
       explosionCount:   `given an explosion, it MUST ALWAYS release exactly 80 particles spread over 360 degrees`
     }
   },
-
   features: {
     generation: {
-      description: `generate a rocket at the bottom center of the screen`,
+      description: `generate a rocket from the bottom of the screen on user input`,
       inputs: [`on click`, `on touch`],
       directives: [
+        `apply catalog.rules.obligations.click_position for generation`,
         `apply catalog.rules.constraints.concurrent for generation`,
         `apply catalog.rules.constraints.step for generation`
       ],
