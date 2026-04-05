@@ -1,0 +1,151 @@
+{
+  hvibe_version: "0.1.0",
+  app: "jumper",
+  description: `a vertical platformer where a square character jumps between platforms rising upward, the player loses if the rising bottom line catches them`,
+  stack: [`javascript`, `browser`, `mobile`],
+
+  catalog: {
+    logic: {
+      jump_arc:       `apply a vertical impulse of -12px to the character velocity on input, then apply gravity of 0.5px per frame downward`,
+      platform_spawn: `spawn platforms at random x positions from the top of the screen, vertically spaced between 80px and 140px apart`,
+      collision:      `if character bottom edge touches platform top edge and character vertical velocity is positive then land the character and reset vertical velocity to 0`,
+      death_line:     `a horizontal line that rises from the bottom at 1px per frame, increasing by 0.1px every 10 seconds`
+    },
+    rules: {
+      obligations: {
+        platforms:  `MUST ALWAYS be reachable from the previous one given a jump impulse of -12px and gravity of 0.5px per frame`,
+        death:      `MUST ALWAYS trigger game over if the character bottom edge y position is below the death line y position`
+      },
+      constraints: {
+        gravity:    `MUST ALWAYS apply a downward acceleration of 0.5px per frame when the character is not on a platform`,
+        jump:       `MUST NEVER allow more than one jump while the character vertical velocity is not zero, jump impulse MUST BE exactly -12px`,
+        scroll:     `MUST ALWAYS scroll the view upward to keep the character within the upper third of the visible screen`,
+        death_line: `MUST ALWAYS rise at a base speed of 60px per second, MUST ALWAYS increase by 6px per second every 10000ms`,
+        platforms:  `MUST NEVER spawn two consecutive platforms with a vertical gap greater than 140px or less than 80px`,
+        collision:  `MUST NEVER detect a landing if the character vertical velocity is negative, MUST NEVER allow the character to land on the side of a platform`
+      }
+    },
+    tests: {
+      jumpInput:      `given a click or touch while the character is on a platform, the character MUST ALWAYS receive a vertical impulse of exactly -12px`,
+      doubleJump:     `given a click while the character vertical velocity is not zero, a second jump MUST NEVER be triggered`,
+      landing:        `given the character falling onto a platform top edge, it MUST ALWAYS land and its vertical velocity MUST BE reset to 0`,
+      sideCollision:  `given the character moving horizontally into a platform side, it MUST NEVER be treated as a landing`,
+      deathTrigger:   `given the death line y position rising above the character bottom edge, game over MUST ALWAYS be triggered immediately`,
+      deathSpeed:     `given 10000ms elapsed, the death line MUST ALWAYS be rising at least 6px per second faster than its initial speed`,
+      platformReach:  `given two consecutive platforms with a vertical gap of 140px, the character MUST ALWAYS be able to reach the upper one`,
+      scrollFollow:   `given the character rising into the upper third of the screen, the view MUST ALWAYS scroll upward to follow`,
+      restartInput:   `given a click or touch on the game over screen, the game MUST ALWAYS restart from initial state`
+    }
+  },
+
+  features: {
+    character: {
+      description: `a square-shaped character controlled by the player, subject to gravity and able to jump on input`,
+      inputs: [`on click`, `on touch`],
+      directives: [
+        `apply catalog.rules.constraints.gravity for character`,
+        `apply catalog.rules.constraints.jump for character`
+      ],
+      tests: [
+        "catalog.tests.jumpInput",
+        "catalog.tests.doubleJump"
+      ],
+      blueprints: [
+        "catalog.logic.jump_arc"
+      ]
+    },
+    platforms: {
+      description: `platforms that spawn from the top and must be jumped on to survive`,
+      inputs: [`triggered by game start`, `triggered by ascent`],
+      directives: [
+        `apply catalog.rules.obligations.platforms for platforms`,
+        `apply catalog.rules.constraints.platforms for platforms`,
+        `apply catalog.rules.constraints.scroll for platforms`
+      ],
+      tests: [
+        "catalog.tests.platformReach",
+        "catalog.tests.scrollFollow"
+      ],
+      blueprints: [
+        "catalog.logic.platform_spawn"
+      ]
+    },
+    collision: {
+      description: `detect when the character lands on a platform and resolve the interaction`,
+      inputs: [`triggered by character motion`],
+      depends_on: [
+        {
+          feature: `character`,
+          when: [`character is falling and approaching a platform top edge`]
+        },
+        {
+          feature: `platforms`,
+          when: [`a platform exists within the character fall trajectory`]
+        }
+      ],
+      directives: [
+        `apply catalog.rules.constraints.collision for collision`
+      ],
+      tests: [
+        "catalog.tests.landing",
+        "catalog.tests.sideCollision"
+      ],
+      blueprints: [
+        "catalog.logic.collision"
+      ]
+    },
+    ascent: {
+      description: `the continuous vertical progression of the game world, platforms move downward relative to the character as it rises`,
+      inputs: [`triggered by collision`],
+      depends_on: [
+        {
+          feature: `collision`,
+          when: [`character has landed on a platform above the previous one`]
+        }
+      ],
+      blueprints: [
+        `Doodle Jump scrolling principle: world scrolls down when character reaches upper third of screen`,
+        `Icy Tower acceleration principle: rising speed and platform gap difficulty increase as score grows`,
+        `infinite runner pattern: despawn platforms below the death line, spawn new ones at the top`
+      ]
+    },
+    death_line: {
+      description: `a rising line from the bottom that kills the player if they fall behind`,
+      inputs: [`triggered by game start`],
+      directives: [
+        `apply catalog.rules.obligations.death for death_line`,
+        `apply catalog.rules.constraints.death_line for death_line`
+      ],
+      tests: [
+        "catalog.tests.deathTrigger",
+        "catalog.tests.deathSpeed"
+      ],
+      blueprints: [
+        "catalog.logic.death_line"
+      ]
+    },
+    game_over: {
+      description: `end the game and display the score when the player is caught by the death line`,
+      inputs: [`triggered by death_line`],
+      depends_on: [
+        {
+          feature: `death_line`,
+          when: [`character bottom edge y position is below death line y position`]
+        }
+      ]
+    },
+    restart: {
+      description: `reset the game to its initial state when the player inputs on the game over screen`,
+      inputs: [`on click`, `on touch`],
+      depends_on: [
+        {
+          feature: `game_over`,
+          when: [`game over screen is displayed`]
+        }
+      ],
+      tests: [
+        "catalog.tests.restartInput"
+      ]
+    }
+  }
+}
