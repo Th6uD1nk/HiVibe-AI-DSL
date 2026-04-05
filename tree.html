@@ -113,6 +113,18 @@
       margin-left: 6px;
     }
 
+    .rule {
+      font-size: 11px;
+      color: #e06c75;
+      margin-left: 6px;
+    }
+
+    .test {
+      font-size: 11px;
+      color: #61afef;
+      margin-left: 6px;
+    }
+
     .value {
       color: #98c379;
       font-style: italic;
@@ -206,8 +218,23 @@
         <div class="leaf"><span class="connector">└──</span> <span class="key">logic_name</span> <span class="value">`description or condition`</span> <span class="llm-direct">LLM-direct</span></div>
       </details>
       <details open>
-        <summary><span class="connector">└──</span> <span class="key">code</span></summary>
+        <summary><span class="connector">├──</span> <span class="key">code</span></summary>
         <div class="leaf"><span class="connector">└──</span> <span class="key">code_name</span> <span class="value">`literal code`</span> <span class="llm-direct">LLM-direct</span></div>
+      </details>
+      <details open>
+        <summary><span class="connector">├──</span> <span class="key">rules</span></summary>
+        <details open>
+          <summary><span class="connector">├──</span> <span class="key">obligations</span></summary>
+          <div class="leaf"><span class="connector">└──</span> <span class="key">rule_name</span> <span class="value">`MUST BE / MUST ALWAYS ... OTHERWISE ...`</span> <span class="rule">rule</span></div>
+        </details>
+        <details open>
+          <summary><span class="connector">└──</span> <span class="key">constraints</span></summary>
+          <div class="leaf"><span class="connector">└──</span> <span class="key">rule_name</span> <span class="value">`MUST ALWAYS / MUST NEVER ... OTHERWISE ...`</span> <span class="rule">rule</span></div>
+        </details>
+      </details>
+      <details open>
+        <summary><span class="connector">└──</span> <span class="key">tests</span></summary>
+        <div class="leaf"><span class="connector">└──</span> <span class="key">test_name</span> <span class="value">`given ... MUST BE / MUST ALWAYS / MUST NEVER ...`</span> <span class="test">test</span></div>
       </details>
     </details>
 
@@ -218,6 +245,8 @@
         <summary><span class="connector">├──</span> <span class="key">feature_name</span></summary>
         <div class="leaf"><span class="connector">├──</span> <span class="key">description</span> <span class="required">√ required</span> <span class="type">`string`</span> <span class="llm-direct">LLM-direct</span></div>
         <div class="leaf"><span class="connector">├──</span> <span class="key">inputs</span> <span class="required">√ required</span> <span class="value">[`trigger`, `trigger`]</span> <span class="llm-direct">LLM-direct</span></div>
+        <div class="leaf"><span class="connector">├──</span> <span class="key">directives</span> <span class="optional">optional</span> <span class="value">[`apply catalog.rules.x for feature`]</span> <span class="rule">rule ref</span></div>
+        <div class="leaf"><span class="connector">├──</span> <span class="key">tests</span> <span class="optional">optional</span> <span class="value">["catalog.tests.name"]</span> <span class="test">test ref</span></div>
         <div class="leaf"><span class="connector">├──</span> <span class="key">blueprints</span> <span class="optional">optional</span> <span class="value">["catalog.logic.name", `llm instruction`]</span></div>
         <details open>
           <summary><span class="connector">└──</span> <span class="key">depends_on</span> <span class="optional">optional</span></summary>
@@ -242,6 +271,8 @@
   <div class="legend-item"><span class="required">√</span> required field</div>
   <div class="legend-item"><span class="optional">optional</span> optional field</div>
   <div class="legend-item"><span class="llm-direct">LLM-direct</span> backtick string, primary instruction</div>
+  <div class="legend-item"><span class="rule">rule</span> behavioral contract</div>
+  <div class="legend-item"><span class="test">test</span> pre-finalization assertion</div>
   <div class="legend-item"><span class="type">type</span> value type</div>
   <div class="legend-item"><span class="value">value</span> example value</div>
 </div>

@@ -7,7 +7,7 @@
   catalog: {
     logic: {
       particle_easing: `quadratic easing curve applied to particle velocity over lifetime`,
-      rocket_arc: `linear interpolation from bottom center to a random point in the upper half`,
+      rocket_arc:      `linear interpolation from bottom center to a random point in the upper half`,
       explosion_trigger: `if rocket.position equals rocket.target then trigger explosion`
     },
     code: {
@@ -19,6 +19,26 @@
         }
         requestAnimationFrame(loop);
       `
+    },
+    rules: {
+      obligations: {
+        explosion: `MUST BE disk-shaped, growing and then explode to particles`,
+        limit:     `MUST ALWAYS stay inside the visible screen area, OTHERWISE explode before reaching screen boundary`
+      },
+      constraints: {
+        step:       `MUST ALWAYS apply a step of no more than 10 per increment`,
+        concurrent: `MUST NEVER exceed 10 simultaneous rockets, OTHERWISE ignore the input`
+      }
+    },
+    tests: {
+      generatePosition: `given a click at any point on the screen, the rocket MUST ALWAYS be generated at the bottom center regardless of click position`,
+      generateLimit:    `given 10 rockets already active, a new click MUST NEVER generate an 11th rocket`,
+      motionUpward:     `verify the motion is always upward, the rocket MUST NEVER move sideways or downward`,
+      motionDirection:  `given a rocket in motion, its y position MUST ALWAYS strictly decrease at every step`,
+      motionStep:       `given any increment, the position delta MUST NEVER exceed 10`,
+      motionBounds:     `given a rocket approaching the screen boundary, it MUST BE triggered to explode before crossing it`,
+      explosionShape:   `given an explosion, it MUST BE disk-shaped and growing before dispersing into particles`,
+      explosionCount:   `given an explosion, it MUST ALWAYS release exactly 80 particles spread over 360 degrees`
     }
   },
 
@@ -26,16 +46,46 @@
     generation: {
       description: `generate a rocket at the bottom center of the screen`,
       inputs: [`on click`, `on touch`],
-      blueprints: ["catalog.logic.rocket_arc", `max 10 simultaneous rockets`]
+      directives: [
+        `apply catalog.rules.constraints.concurrent for generation`,
+        `apply catalog.rules.constraints.step for generation`
+      ],
+      tests: [
+        "catalog.tests.generatePosition",
+        "catalog.tests.generateLimit"
+      ],
+      blueprints: [
+        "catalog.logic.rocket_arc"
+      ]
     },
     motion: {
       description: `rocket rises from bottom to a random height`,
       inputs: [`triggered by generation`],
-      blueprints: ["catalog.code.animation_loop"]
+      directives: [
+        `apply catalog.rules.constraints.step for motion`,
+        `apply catalog.rules.obligations.limit for motion`
+      ],
+      tests: [
+        "catalog.tests.motionUpward",
+        "catalog.tests.motionDirection",
+        "catalog.tests.motionStep",
+        "catalog.tests.motionBounds"
+      ],
+      blueprints: [
+        "catalog.code.animation_loop"
+      ]
     },
     explosion: {
       description: `explode the rocket into particles when it reaches its target height`,
       inputs: [`triggered by motion`],
+      directives: [
+        `apply catalog.rules.obligations.explosion for explosion`,
+        `apply catalog.rules.obligations.limit for explosion`
+      ],
+      tests: [
+        "catalog.tests.explosionShape",
+        "catalog.tests.explosionCount"
+      ],
       depends_on: [
         {
           feature: `motion`,
@@ -44,7 +94,7 @@
       ],
       blueprints: [
         "catalog.logic.particle_easing",
-        `catalog.logic.explosion_trigger`,
+        "catalog.logic.explosion_trigger",
         `80 particles per explosion, spread 360 degrees`
       ]
     }
