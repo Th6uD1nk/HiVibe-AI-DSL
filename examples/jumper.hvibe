@@ -21,6 +21,7 @@
         output:      `MUST ALWAYS produce a single self-contained HTML file with all JavaScript inline, MUST NEVER produce separate files`
       },
       constraints: {
+        game_loop: `MUST ALWAYS call requestAnimationFrame unconditionally at the end of the loop, MUST NEVER place requestAnimationFrame inside a conditional branch`,
         gravity:    `MUST ALWAYS apply a downward acceleration of 0.5px per frame when the character is not on a platform`,
         jump:       `MUST NEVER allow more than one jump while the character vertical velocity is not zero, jump impulse MUST BE exactly -12px`,
         scroll:     `MUST ALWAYS scroll the view upward to keep the character within the upper third of the visible screen`,
@@ -31,6 +32,8 @@
       }
     },
     tests: {
+      loopContinuity: `given gameOver is true, the game loop MUST ALWAYS continue running, MUST NEVER stop calling requestAnimationFrame`,
+      restartLoop:    `given restartGame is called, MUST NEVER result in two simultaneous loop instances running`,
       outputFormat:   `the output MUST ALWAYS be a single HTML file that runs in a browser without any external dependency`,
       jumpInput:      `given a click or touch while the character is on a platform or ground, the character MUST ALWAYS receive a vertical impulse of exactly -12px`,
       jumpTarget:     `given a click at x=400, the character MUST ALWAYS move horizontally toward x=400 during the jump`,
@@ -194,6 +197,13 @@
           feature: `death_line`,
           when: [`character bottom edge y position is below death line y position`]
         }
+      ],
+      directives: [
+        `apply catalog.rules.constraints.game_loop for game_over`
+      ],
+      tests: [
+        "catalog.tests.loopContinuity",
+        "catalog.tests.restartLoop"
       ]
     },
     restart: {
