@@ -1,0 +1,122 @@
+{
+  hvibe_version: "0.2.0",
+  app: "firework-psp",
+  description: `a simple firework simulation for sony psp`,
+  stack: [`c`, `pspsdk`, `pspgu`, `psp`],
+
+  catalog: {
+    logic: {
+      particle_easing:   `quadratic easing curve applied to particle velocity over lifetime`,
+      rocket_arc:        `linear interpolation from the bottom of the screen at the x position of the X button press to a random point in the upper half`,
+      explosion_trigger: `if rocket.position equals rocket.target then trigger explosion`
+    },
+    tests: {
+      generatePosition: `given an X button press, the rocket MUST ALWAYS be generated at the bottom of the screen at a random x position`,
+      generateLimit:    `given 10 rockets already active, a new X button press MUST NEVER generate an 11th rocket`,
+      motionUpward:     `verify the motion is always upward, the rocket MUST NEVER move sideways or downward`,
+      motionDirection:  `given a rocket in motion, its y position MUST ALWAYS strictly decrease at every step`,
+      motionStep:       `given any increment, the position delta MUST NEVER exceed 10`,
+      motionBounds:     `given a rocket approaching the screen boundary, it MUST BE triggered to explode before crossing it`,
+      explosionShape:   `given an explosion, it MUST BE disk-shaped and growing before dispersing into particles`,
+      explosionCount:   `given an explosion, it MUST ALWAYS release exactly 80 particles spread over 360 degrees`,
+      outputFiles:      `the output MUST ALWAYS consist of exactly two files: main.c and Makefile, MUST NEVER produce additional source files`
+    }
+  },
+
+  units: {
+    output: {
+      references: [
+        "https://github.com/pspdev/pspsdk/blob/master/src/samples/controller/basic/Makefile.sample",
+        "https://github.com/pspdev/pspsdk/blob/master/src/samples/gu/cube/Makefile.sample",
+      ],
+      features: {
+        output: {
+          description: `the final deliverable is a single main.c file containing all code, and a Makefile to build it with make`,
+          inputs: [`triggered by code generation`],
+          rules: {
+            obligations: {
+              single_file: `MUST ALWAYS produce a single main.c file containing all code, MUST NEVER split code across multiple source files`,
+              makefile:    `MUST ALWAYS produce a Makefile compatible with pspsdk that builds the project using make`,
+              build_tool:  `MUST ALWAYS use make as the build tool`
+            }
+          },
+          tests: ["catalog.tests.outputFiles"]
+        }
+      }
+    },
+    simulation: {
+      references: [
+        "https://github.com/pspdev/pspsdk/blob/master/src/samples/gu/doublelist/doublelist.c"
+        "https://github.com/pspdev/pspsdk/blob/master/src/samples/gu/cube/cube.c",
+        "https://github.com/pspdev/pspsdk/blob/master/src/gu/pspgu.h",
+      ],
+      description: `core firework simulation logic`,
+      features: {
+        generation: {
+          description: `generate a rocket from the bottom of the screen when the player presses the X button`,
+          inputs: [`on X button press`],
+          rules: {
+            obligations: {
+              input: `MUST ALWAYS use PSP X button (SCE_CTRL_CROSS) as the only input trigger`
+            },
+            constraints: {
+              concurrent: `MUST NEVER exceed 10 simultaneous rockets, OTHERWISE ignore the input`,
+              step:       `MUST ALWAYS apply a step of no more than 10 per increment`
+            }
+          },
+          tests: [
+            "catalog.tests.generatePosition",
+            "catalog.tests.generateLimit"
+          ],
+          blueprints: [
+            "catalog.logic.rocket_arc"
+          ]
+        },
+        motion: {
+          description: `rocket rises from bottom to a random height`,
+          inputs: [`triggered by generation`],
+          rules: {
+            obligations: {
+              limit: `MUST ALWAYS stay inside the visible screen area, OTHERWISE explode before reaching screen boundary`
+            },
+            constraints: {
+              step: `MUST ALWAYS apply a step of no more than 10 per increment`
+            }
+          },
+          tests: [
+            "catalog.tests.motionUpward",
+            "catalog.tests.motionDirection",
+            "catalog.tests.motionStep",
+            "catalog.tests.motionBounds"
+          ]
+        },
+        explosion: {
+          description: `explode the rocket into particles when it reaches its target height`,
+          inputs: [`triggered by motion`],
+          rules: {
+            obligations: {
+              shape:    `MUST BE disk-shaped, growing and then explode to particles`,
+              limit:    `MUST ALWAYS stay inside the visible screen area, OTHERWISE explode before reaching screen boundary`,
+              renderer: `MUST ALWAYS use pspgu for all rendering operations`
+            }
+          },
+          tests: [
+            "catalog.tests.explosionShape",
+            "catalog.tests.explosionCount"
+          ],
+          depends_on: [
+            {
+              feature: `motion`,
+              when: [`rocket has reached target height`]
+            }
+          ],
+          blueprints: [
+            "catalog.logic.particle_easing",
+            "catalog.logic.explosion_trigger",
+            `80 particles per explosion, spread 360 degrees`
+          ]
+        }
+      }
+    }
+  }
+}
