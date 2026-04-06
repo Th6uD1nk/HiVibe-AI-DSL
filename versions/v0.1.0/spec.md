@@ -225,7 +225,7 @@ features: {
 
 ## Structure tree
 
-See [tree.html](https://htmlpreview.github.io/?https://github.com/Th6uD1nk/HighVibe/blob/main/tree.html) for the interactive version.
+See [tree.html](https://htmlpreview.github.io/?https://github.com/Th6uD1nk/HighVibe/blob/main/versions/v0.1.0/tree.html) for the interactive version.
 
 ```
 .hvibe

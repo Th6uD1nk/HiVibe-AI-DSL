@@ -190,7 +190,7 @@ Each entry is an object with the following fields:
 
 ## Structure tree
 
-See [tree.html](https://htmlpreview.github.io/?https://github.com/Th6uD1nk/HighVibe/blob/main/versions/0.2.0/tree.html) for the interactive version.
+See [tree.html](https://htmlpreview.github.io/?https://github.com/Th6uD1nk/HighVibe/blob/main/versions/v0.2.0/tree.html) for the interactive version.
 
 ```
 .hvibe
