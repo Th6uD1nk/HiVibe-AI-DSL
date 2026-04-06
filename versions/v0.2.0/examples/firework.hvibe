@@ -1,0 +1,123 @@
+{
+  hvibe_version: "0.2.0",
+  app: "firework",
+  description: `a simple firework simulation in the browser`,
+  stack: [`javascript`, `html`, `browser`, `mobile`],
+
+  catalog: {
+    logic: {
+      particle_easing:   `quadratic easing curve applied to particle velocity over lifetime`,
+      rocket_arc:        `linear interpolation from the bottom of the screen at the x position of the click to a random point in the upper half`,
+      explosion_trigger: `if rocket.position equals rocket.target then trigger explosion`
+    },
+    code: {
+      animation_loop: `
+        function loop(timestamp) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          update(timestamp);
+          requestAnimationFrame(loop);
+        }
+        requestAnimationFrame(loop);
+      `
+    },
+    tests: {
+      outputFormat:     `the output MUST ALWAYS be a single HTML file that runs in a browser without any external dependency`,
+      generatePosition: `given a click or touch at any x position, the rocket MUST ALWAYS be generated at the bottom of the screen at that exact x position`,
+      generateLimit:    `given 10 rockets already active, a new click MUST NEVER generate an 11th rocket`,
+      motionUpward:     `verify the motion is always upward, the rocket MUST NEVER move sideways or downward`,
+      motionDirection:  `given a rocket in motion, its y position MUST ALWAYS strictly decrease at every step`,
+      motionStep:       `given any increment, the position delta MUST NEVER exceed 10`,
+      motionBounds:     `given a rocket approaching the screen boundary, it MUST BE triggered to explode before crossing it`,
+      explosionShape:   `given an explosion, it MUST BE disk-shaped and growing before dispersing into particles`,
+      explosionCount:   `given an explosion, it MUST ALWAYS release exactly 80 particles spread over 360 degrees`
+    }
+  },
+
+  units: {
+    output: {
+      features: {
+        output: {
+          description: `the final deliverable is a single self-contained HTML file with all JavaScript inline and no external dependencies`,
+          inputs: [`triggered by code generation`],
+          rules: {
+            obligations: {
+              format: `MUST ALWAYS produce a single self-contained HTML file with all JavaScript inline, MUST NEVER produce separate files`
+            }
+          },
+          tests: ["catalog.tests.outputFormat"]
+        }
+      }
+    },
+    simulation: {
+      description: `core firework simulation logic`,
+      features: {
+        generation: {
+          description: `generate a rocket from the bottom of the screen on user input`,
+          inputs: [`on click`, `on touch`],
+          rules: {
+            obligations: {
+              click_position: `MUST ALWAYS be generated at the bottom of the screen at the exact x position of the click or touch input`
+            },
+            constraints: {
+              concurrent: `MUST NEVER exceed 10 simultaneous rockets, OTHERWISE ignore the input`,
+              step:       `MUST ALWAYS apply a step of no more than 10 per increment`
+            }
+          },
+          tests: [
+            "catalog.tests.generatePosition",
+            "catalog.tests.generateLimit"
+          ],
+          blueprints: [
+            "catalog.logic.rocket_arc"
+          ]
+        },
+        motion: {
+          description: `rocket rises from bottom to a random height`,
+          inputs: [`triggered by generation`],
+          rules: {
+            obligations: {
+              limit: `MUST ALWAYS stay inside the visible screen area, OTHERWISE explode before reaching screen boundary`
+            },
+            constraints: {
+              step: `MUST ALWAYS apply a step of no more than 10 per increment`
+            }
+          },
+          tests: [
+            "catalog.tests.motionUpward",
+            "catalog.tests.motionDirection",
+            "catalog.tests.motionStep",
+            "catalog.tests.motionBounds"
+          ],
+          blueprints: [
+            "catalog.code.animation_loop"
+          ]
+        },
+        explosion: {
+          description: `explode the rocket into particles when it reaches its target height`,
+          inputs: [`triggered by motion`],
+          rules: {
+            obligations: {
+              shape: `MUST BE disk-shaped, growing and then explode to particles`,
+              limit: `MUST ALWAYS stay inside the visible screen area, OTHERWISE explode before reaching screen boundary`
+            }
+          },
+          tests: [
+            "catalog.tests.explosionShape",
+            "catalog.tests.explosionCount"
+          ],
+          depends_on: [
+            {
+              feature: `motion`,
+              when: [`rocket has reached target height`]
+            }
+          ],
+          blueprints: [
+            "catalog.logic.particle_easing",
+            "catalog.logic.explosion_trigger",
+            `80 particles per explosion, spread 360 degrees`
+          ]
+        }
+      }
+    }
+  }
+}
