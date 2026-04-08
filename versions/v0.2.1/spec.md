@@ -1,4 +1,4 @@
-# HighVibe Specification
+# HiVibe Specification
 **Version:** 0.2.1  
 **File extension:** `.hvibe`  
 **Status:** Draft
@@ -6,7 +6,7 @@
 
 ## Overview
 
-HighVibe is a high-level, structured and maintainable Domain Specific Language for vibe coding, based on JSON.
+HiVibe is a high-level, structured and maintainable Domain Specific Language for vibe coding, based on JSON.
 
 Its purpose is to:
 - **Organize** a vibe coding project in a human-readable and LLM-readable format
@@ -21,14 +21,14 @@ A `.hvibe` file is based on JavaScript object notation, without being strictly J
 
 ### String conventions
 
-HighVibe defines two classes of strings with distinct delimiters:
+HiVibe defines two classes of strings with distinct delimiters:
 
 | Delimiter | Type | Priority | Description |
 |-----------|------|----------|-------------|
 | `` ` ` `` | **LLM-direct** | High | Content the LLM must treat as a primary instruction. These strings are authoritative and should be interpreted literally and faithfully. |
 | `" "` | **LLM-indirect** | Normal | Content intended primarily for developers or parsers/validators. The LLM should not ignore these strings, but they are not primary instructions. |
 
-**Object keys are never quoted.** Keys belong to the HighVibe schema and carry structural meaning defined by this specification. The LLM and/or HighVibe interpreters are expected to be aware of it.
+**Object keys are never quoted.** Keys belong to the HiVibe schema and carry structural meaning defined by this specification. The LLM and/or HiVibe interpreters are expected to be aware of it.
 
 ```js
 // Example of the convention in practice
@@ -43,7 +43,7 @@ description: `a simple firework simulation in the browser`, // direct: LLM instr
 
 | Field | Required | Type | Description |
 |-------|:--------:|------|-------------|
-| `hvibe_version` | √ | `string` | HighVibe spec version this file targets (e.g. `"0.2.1"`) |
+| `hvibe_version` | √ | `string` | HiVibe spec version this file targets (e.g. `"0.2.1"`) |
 | `app` | √ | `string` | The name of the application |
 | `description` | √ | `` `string` `` | A natural language description of the app. LLM-direct. |
 | `stack` | √ | `array` or `object` | Technologies used. See below. |
@@ -335,7 +335,7 @@ Each lock entry:
 
 ## Design principles
 
-- **Keys are schema.** Unquoted keys belong to the HighVibe schema. They are structural, not instructional.
+- **Keys are schema.** Unquoted keys belong to the HiVibe schema. They are structural, not instructional.
 - **Quoted strings are content.** Double-quoted strings carry developer-facing or tooling-facing information. The LLM reads them but does not treat them as primary instructions.
 - **Backtick strings are instructions.** Backtick strings are direct contracts with the LLM. They must be interpreted literally and faithfully, and take priority over all other content.
 - **Units are the organizational structure.** Each unit groups related features under a named, optionally described container.
@@ -367,9 +367,9 @@ Each lock entry:
 
 ## Versioning
 
-The `hvibe_version` field must be present in every file. It refers to the version of the HighVibe specification the file is written against, not the version of the app itself.
+The `hvibe_version` field must be present in every file. It refers to the version of the HiVibe specification the file is written against, not the version of the app itself.
 
 Current version: `0.2.1`
 
 
-*HighVibe is an open specification. Contributions and discussions are welcome.*
+*HiVibe is an open specification. Contributions and discussions are welcome.*
