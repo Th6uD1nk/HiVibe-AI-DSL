@@ -69,7 +69,8 @@
           inputs: [`triggered by game start`, `triggered by ascent`],
           rules: {
             obligations: {
-              reachable: `MUST ALWAYS be reachable from the previous one given a jump impulse of -12px and gravity of 0.5px per frame`
+              reachable: `MUST ALWAYS be reachable from the previous one given a jump impulse of -12px and gravity of 0.5px per frame`,
+              initial_count: `MUST ALWAYS generate enough platforms at game start to fill at least two screen heights above the ground line`
             },
             constraints: {
               gap:       `MUST NEVER spawn two consecutive platforms with a vertical gap greater than 140px or less than 80px`,

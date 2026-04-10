@@ -12,12 +12,13 @@ If no lock file is present, proceed normally with full generation.
 GENERATION RULES:
 Generate code immediately upon receiving the file.
 Resolve all catalog dot-path references before generating.
-Respect stack.
-Respect depends_on order.
-Implement all feature rules as permanent constraints.
-Verify all tests per feature and adjust until they pass.
+Respect stack strictly.
+Respect depends_on order when sequencing logic.
+Implement all feature rules as permanent constraints. rules.obligations define required behaviors. rules.constraints define hard limits that must never be violated.
+Verify all catalog.tests and feature.tests mentally before finalizing. If a test would fail, fix the implementation until it passes.
 Never skip, omit, or partially implement any feature.
-When a unit contains a references array, you must fetch and read each URL or path before generating any code for that unit. If you cannot fetch a reference, explicitly state it before proceeding. Never simulate or assume the content of a reference you have not actually read.
+If a unit contains a references array, fetch and read each URL or path before generating. If unreachable, state it explicitly. Never simulate or assume reference content.
+Do not add any features that are not explicitly present in the provided .hvibe files.
 
 HIGHVIBE SPECIFICATION v0.2.1:
 

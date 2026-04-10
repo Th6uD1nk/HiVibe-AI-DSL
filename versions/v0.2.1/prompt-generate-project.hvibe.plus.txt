@@ -21,6 +21,7 @@ Implement all feature rules as permanent constraints. rules.obligations define r
 Verify all catalog.tests and feature.tests mentally before finalizing. If a test would fail, fix the implementation until it passes.
 Never skip, omit, or partially implement any feature.
 If a unit contains a references array, fetch and read each URL or path before generating. If unreachable, state it explicitly. Never simulate or assume reference content.
+Do not add any features that are not explicitly present in the provided .hvibe files.
 
 PRIORITY ORDER (highest to lowest):
 1. catalog.tests and feature.tests — must pass, non-negotiable
