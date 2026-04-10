@@ -72,9 +72,10 @@
               reachable: `MUST ALWAYS be reachable from the previous one given a jump impulse of -12px and gravity of 0.5px per frame`
             },
             constraints: {
-              gap:    `MUST NEVER spawn two consecutive platforms with a vertical gap greater than 140px or less than 80px`,
-              scroll: `MUST ALWAYS scroll the view upward to keep the character within the upper third of the visible screen`,
-              spawn:  `MUST NEVER spawn a new platform if a platform already exists above the current viewport top`
+              gap:       `MUST NEVER spawn two consecutive platforms with a vertical gap greater than 140px or less than 80px`,
+              first_gap: `MUST NEVER spawn the first platform above the ground with a vertical gap greater than 100px`,
+              scroll:    `MUST ALWAYS scroll the view upward to keep the character within the upper third of the visible screen`,
+              spawn:     `MUST NEVER spawn a new platform if a platform already exists above the current viewport top`
             }
           },
           tests: [

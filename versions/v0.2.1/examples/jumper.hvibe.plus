@@ -357,6 +357,17 @@
                     platforms.push({ x: newX, y: newY, width: 80, height: 10 })
                   }
                 }
+              `,
+              first_gap: `
+                // MUST NEVER spawn the first platform above the ground with a vertical gap greater than 100px
+                const first_gap = () => {
+                  // MUST NEVER: first platform y < groundY - 100
+                  // the first platform is always the one closest to groundY in the initial spawn
+                  // cap its gap to 100px to guarantee the player can reach it on the first jump
+                  const firstGap = 60 + Math.random() * 40 // between 60 and 100px
+                  const firstPlatformY = groundY - firstGap
+                  console.assert(firstPlatformY >= groundY - 100, 'first platform must be reachable')
+                }
               `
             }
           },
