@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Jumper</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #0e0f14;
+    }
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+const GRAVITY = 0.5;
+const JUMP_IMPULSE = -12;
+const DEATH_LINE_BASE_SPEED = 60;
+const DEATH_LINE_ACCEL_RATE = 6;
+const DEATH_LINE_ACCEL_INTERVAL = 10000;
+const PLATFORM_GAP_MIN = 80;
+const PLATFORM_GAP_MAX = 140;
+const SCROLL_THRESHOLD = 1 / 3;
+
+let gameOver = false;
+let score = 0;
+let elapsedMs = 0;
+
+let character = {
+  x: canvas.width / 2,
+  y: 0,
+  vx: 0,
+  vy: 0,
+  width: 30,
+  height: 30,
+  onGround: true
+};
+
+let platforms = [];
+let targetX = null;
+
+let groundY = canvas.height - 40;
+let cameraOffsetY = 0;
+let deathLineY = groundY + 60;
+
+function init() {
+  groundY = canvas.height - 40;
+
+  character.x = canvas.width / 2;
+  character.y = groundY - character.height;
+  character.vx = 0;
+  character.vy = 0;
+  character.onGround = true;
+
+  deathLineY = groundY + 60;
+
+  platforms = [];
+  cameraOffsetY = 0;
+  score = 0;
+  gameOver = false;
+  targetX = null;
+
+  spawnPlatforms();
+}
+
+document.addEventListener("click", (e) => {
+  if (gameOver) {
+    restartGame();
+    return;
+  }
+  targetX = e.clientX;
+  jump();
+});
+
+document.addEventListener("touchstart", (e) => {
+  if (gameOver) {
+    restartGame();
+    return;
+  }
+  targetX = e.touches[0].clientX;
+  jump();
+});
+
+function jump() {
+  if (character.onGround) {
+    character.vy = JUMP_IMPULSE;
+    character.onGround = false;
+  }
+}
+
+function spawnPlatforms() {
+  const width = canvas.width;
+  const platformWidth = 80;
+
+  let lastY = groundY;
+
+  for (let i = 0; i < 12; i++) {
+    const gap = PLATFORM_GAP_MIN + Math.random() * (PLATFORM_GAP_MAX - PLATFORM_GAP_MIN);
+    const newY = lastY - gap;
+    const newX = Math.random() * (width - platformWidth);
+
+    platforms.push({
+      x: newX,
+      y: newY,
+      width: platformWidth,
+      height: 10
+    });
+
+    lastY = newY;
+  }
+}
+
+function collision() {
+  if (character.vy <= 0) return;
+
+  for (const p of platforms) {
+    const charBottom = character.y + character.height;
+    const prevBottom = charBottom - character.vy;
+
+    const withinX =
+      character.x + character.width > p.x &&
+      character.x < p.x + p.width;
+
+    const crossingTop =
+      prevBottom <= p.y &&
+      charBottom >= p.y;
+
+    if (withinX && crossingTop) {
+      character.y = p.y - character.height;
+      character.vy = 0;
+      character.vx = 0;
+      character.onGround = true;
+
+      score += 1;
+      break;
+    }
+  }
+}
+
+function motion() {
+  if (!character.onGround && targetX !== null) {
+    const dx = targetX - character.x;
+    character.vx = dx * 0.08;
+    character.x += character.vx;
+  } else {
+    character.vx = 0;
+  }
+}
+
+function physics() {
+  if (!character.onGround) {
+    character.vy += GRAVITY;
+  }
+  character.y += character.vy;
+}
+
+function camera() {
+  const screenY = character.y - cameraOffsetY;
+
+  if (screenY < canvas.height * SCROLL_THRESHOLD) {
+    cameraOffsetY = character.y - canvas.height * SCROLL_THRESHOLD;
+  }
+}
+
+function platformUpdate() {
+  const minY = Math.min(...platforms.map(p => p.y));
+
+  if (minY >= cameraOffsetY) {
+    const gap = PLATFORM_GAP_MIN + Math.random() * (PLATFORM_GAP_MAX - PLATFORM_GAP_MIN);
+    const newY = minY - gap;
+    const newX = Math.random() * (canvas.width - 80);
+
+    platforms.push({ x: newX, y: newY, width: 80, height: 10 });
+  }
+
+  platforms = platforms.filter(p => (p.y - cameraOffsetY) < canvas.height + 100);
+}
+
+function deathLine() {
+  const intervals = Math.floor(elapsedMs / DEATH_LINE_ACCEL_INTERVAL);
+  const speed = (DEATH_LINE_BASE_SPEED + intervals * DEATH_LINE_ACCEL_RATE) / 60;
+
+  deathLineY -= speed;
+
+  const charBottom = character.y + character.height;
+  if (deathLineY <= charBottom) {
+    gameOver = true;
+  }
+}
+
+function update() {
+  if (!gameOver) {
+    motion();
+    physics();
+    collision();
+    camera();
+    platformUpdate();
+    deathLine();
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  ctx.save();
+  ctx.translate(0, -cameraOffsetY);
+
+  ctx.fillStyle = "#2a2f3a";
+  ctx.fillRect(0, groundY, canvas.width, 40);
+
+  ctx.fillStyle = "#6bd1ff";
+  for (const p of platforms) {
+    ctx.fillRect(p.x, p.y, p.width, p.height);
+  }
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(character.x, character.y, character.width, character.height);
+
+  ctx.fillStyle = "#ff3b3b";
+  ctx.fillRect(0, deathLineY, canvas.width, 3);
+
+  ctx.restore();
+
+  ctx.fillStyle = "#fff";
+  ctx.font = "16px Arial";
+  ctx.fillText("Score: " + score, 20, 30);
+
+  if (gameOver) {
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = "#fff";
+    ctx.font = "30px Arial";
+    ctx.fillText("GAME OVER", canvas.width / 2 - 90, canvas.height / 2);
+    ctx.font = "18px Arial";
+    ctx.fillText("Click to restart", canvas.width / 2 - 70, canvas.height / 2 + 40);
+  }
+}
+
+function loop(timestamp) {
+  elapsedMs = timestamp;
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function restartGame() {
+  init();
+}
+
+init();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
+
