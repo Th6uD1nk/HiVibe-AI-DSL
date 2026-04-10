@@ -79,6 +79,7 @@ The catalog can be defined inline or referenced as an external file. When define
 ```js
 // Inline
 catalog: {
+  globals: `...`,
   logic: { ... },
   code: { ... },
   tests: { ... }
@@ -90,9 +91,26 @@ catalog: "path/to/shared-catalog.hvibe"
 
 | Field | Required | Type | Description |
 |-------|:--------:|------|-------------|
+| `globals` | | `` `string` `` | Shared constants and variables used across all features. LLM-direct. Declared first inside the catalog. See below. |
 | `logic` | | `object` | Named logic entries: algorithms, conditions expressed in natural language. LLM-direct. |
-| `code` | | `object` | Named code entries: literal code snippets the LLM must use as-is or as close reference. LLM-direct. |
+| `code` | | `object` | Named code entries: literal code snippets the LLM must use as close reference. LLM-direct. |
 | `tests` | | `object` | Named tests the LLM must verify before finalizing code. See below. |
+
+#### `catalog.globals`
+
+An optional backtick field that declares constants and variables shared across all features. The LLM must read this field first and use the declared values as-is throughout the generated code. Values must not be redeclared.
+
+```js
+catalog: {
+  globals: `
+    const GRAVITY = 0.5
+    const JUMP_IMPULSE = -12
+    const DEATH_BASE_SPEED = 60
+  `,
+  logic: { ... },
+  tests: { ... }
+}
+```
 
 #### `catalog.tests`
 
@@ -214,6 +232,74 @@ Each entry in `depends_on` is an object with the following fields:
 | `when` | | `array` | Conditions under which the dependency applies. LLM-direct strings. |
 
 
+## `.hvibe.plus`
+
+A `.hvibe.plus` file is an enriched version of a `.hvibe` file. It is structurally identical to the source file but replaces backtick string content in specific paths with JavaScript arrow functions. The original natural language content is preserved as a JSDoc comment inside the function body.
+
+### Purpose
+
+- Provide the code generation agent with concrete, syntactically valid implementation sketches rather than natural language descriptions alone.
+- Increase the precision and consistency of code generation, especially for smaller or less capable models.
+- Serve as an intermediate step between the source `.hvibe` and the final generated code.
+
+### Enriched paths
+
+Enrichment applies exclusively to the following paths:
+
+| Path | Description |
+|------|-------------|
+| `catalog.globals` | Shared constants declared as a backtick field |
+| `catalog.logic.$name` | Logic entries replaced with arrow functions |
+| `catalog.tests.$name` | Test entries replaced with arrow functions asserting passing conditions |
+| `feature.$name.description` | Feature descriptions replaced with arrow functions |
+| `feature.$name.rules.constraints.$name` | Constraint rules replaced with arrow functions |
+| `feature.$name.rules.obligations.$name` | Obligation rules replaced with arrow functions |
+
+All other paths are left exactly as-is. No fields are added, removed, or renamed outside the enriched paths.
+
+### Format
+
+The enrichment language is always JavaScript, regardless of the stack. Each enriched backtick string becomes an arrow function. The function name matches the field key. The original natural language content becomes a JSDoc comment inside the function body.
+
+```js
+fieldKey: `
+  // original natural language content preserved here as comment
+  const fieldKey = () => {
+    // implementation sketch in JS
+  }
+`
+```
+
+Global variables are declared in `catalog.globals` as a backtick field, before `logic` and `tests`:
+
+```js
+catalog: {
+  globals: `
+    const GRAVITY = 0.5
+    const JUMP_IMPULSE = -12
+  `,
+  logic: { ... },
+  tests: { ... }
+}
+```
+
+### Formatting rules
+
+- The overall object structure uses 2 spaces indentation at every nesting level.
+- Every backtick string content is indented with 2 spaces relative to its parent key.
+- Every JS arrow function body is indented with 2 spaces relative to the function opening brace.
+- Multiple lines are never collapsed into one. Line breaks between fields are never omitted.
+- No markdown fences. No text outside the hvibe structure.
+
+### Reading rules for the generation agent
+
+When receiving a `.hvibe.plus` file, the generation agent must:
+
+1. Read `catalog.globals` first and treat all declared variables as global constants. Do not redeclare them.
+2. Treat every arrow function body as the authoritative implementation reference. Code takes priority over its JSDoc comment.
+3. Adapt the code only when strictly required by global implementation constraints such as naming conflicts, integration with `depends_on`, or stack coherence. Never reinterpret, simplify, or ignore the intent. Any adaptation must preserve the original logic exactly.
+
+
 ## `.hvibe.lock`
 
 A `.hvibe.lock` file is an automatically generated companion file that records which features have been implemented and verified in a previous session. It acts as a protection layer for the next agent: locked features must not be reimplemented or reinterpreted.
@@ -243,9 +329,9 @@ The lock file uses the same JavaScript object notation as `.hvibe`. Keys are unq
 
 ### Lock rules for the LLM
 
-- **If a feature is `locked: true`**, the LLM must treat its existing implementation as final. It must not regenerate, refactor, or reinterpret it.
+- **If a feature is `locked: true`**, the LLM must treat its existing implementation as final. It must not regenerate, refactor, or reinterpret it. This applies to both generation and enrichment agents.
 - **If a feature needs to change despite being locked**, the LLM must flag it explicitly and request user validation before modifying anything. This must be indicated in the first prompt of the session.
-- **If no lock file is present**, the LLM proceeds normally with full generation.
+- **If no lock file is present**, the LLM proceeds normally with full generation or enrichment.
 
 ### Fields
 
@@ -299,6 +385,7 @@ Each lock entry:
 │       ├── back:  [`tech`, `tech`]
 │       └── db:    [`tech`]
 ├── catalog (optional, inline or external path)
+│   ├── globals: `const VAR = value`
 │   ├── logic:
 │   │   └── logic_name: `description or condition`
 │   ├── code:
@@ -325,6 +412,15 @@ Each lock entry:
                     ├── feature: `feature_name`
                     └── when: [`condition`, `condition`]
 
+.hvibe.plus (enriched variant)
+├── [same structure as .hvibe]
+└── catalog
+    ├── globals: `const VAR = value  ...`
+    ├── logic:
+    │   └── logic_name: `const logic_name = () => { ... }`
+    └── tests:
+        └── test_name: `const test_name = () => { console.assert(...) }`
+
 .hvibe.lock
 ├── hvibe_lock_version
 ├── locked_at
@@ -343,9 +439,11 @@ Each lock entry:
 - **Rules are local contracts.** Rules are declared inside the feature they govern. They are permanent behavioral constraints, not suggestions.
 - **Tests are pre-finalization checks.** Tests defined in `catalog.tests` must be verified by the LLM before finalizing a feature. If a test fails, the LLM must adjust its output.
 - **The catalog is global and composable.** The catalog is shared across all units. It can be defined inline or referenced as an external file, and multiple catalogs across files complement each other.
+- **`catalog.globals` is read first.** Global constants declared in `catalog.globals` are shared across all features and must not be redeclared.
+- **`.hvibe.plus` is the enriched intermediate.** A `.hvibe.plus` file replaces natural language backtick content with JavaScript arrow functions, providing concrete implementation sketches for the generation agent.
 - **Features are the unit of modularity.** Each feature is a self-contained, describable and extensible unit. Features may declare dependencies on other features, the exact mechanism is reserved for a future version of this spec.
 - **The file is the project memory.** A `.hvibe` file should contain enough context to reconstruct or extend the project without additional documentation.
-- **The lock file is the session memory.** A `.hvibe.lock` file records validated implementation decisions across sessions. Locked features are immutable unless the user explicitly approves a change.
+- **The lock file is the session memory.** A `.hvibe.lock` file records validated implementation decisions across sessions. Locked features are immutable unless the user explicitly approves a change. The lock applies to both generation and enrichment agents.
 
 
 ## Changelog
@@ -353,6 +451,8 @@ Each lock entry:
 ### 0.2.1
 - Added `references` field to units. When present, the LLM must fetch and read all listed URLs or paths before generating code for the unit.
 - Introduced the `.hvibe.lock` companion file format. The lock records which features have been implemented and verified, preventing inter-session drift and reducing token consumption.
+- Added `catalog.globals`: an optional backtick field declaring shared constants and variables used across all features. Must be declared first inside the catalog. The generation agent reads it first and must not redeclare its values.
+- Introduced the `.hvibe.plus` file format: a structurally identical enriched variant of `.hvibe` where backtick content in specific paths is replaced with JavaScript arrow functions. Serves as an intermediate step between the source `.hvibe` and final generated code.
 
 ### 0.2.0
 - Introduced `units` as the primary organizational structure. Features now live inside units.
