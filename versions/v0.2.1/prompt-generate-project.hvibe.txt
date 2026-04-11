@@ -34,6 +34,13 @@ code: literal code snippets, use as-is.
 tests: assertions to verify before finalizing, adjust until all pass. Keywords: MUST BE, MUST ALWAYS, MUST NEVER, OTHERWISE.
 If catalog is a string, treat it as a path to an external catalog file. Multiple catalogs complement each other.
 
+If a logic or code entry is prefixed with `STRICT:`
+- It becomes a deterministic algorithm specification.
+- The LLM must implement it exactly as described.
+- No generalization, abstraction, or architectural extension is allowed.
+- The logic must be treated as executable intent, not interpretative guidance.
+- Any deviation is considered an implementation error.
+
 .3 UNITS
 Each unit has an optional name, an optional description (LLM-direct), an optional references array of external URLs or paths to fetch and read before generating, and a features object.
 

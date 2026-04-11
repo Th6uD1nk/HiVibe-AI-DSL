@@ -46,6 +46,13 @@ code: literal code snippets, use as-is only when explicitly marked as final.
 tests: arrow functions asserting passing conditions. Must pass before finalizing. Keywords: MUST BE, MUST ALWAYS, MUST NEVER, OTHERWISE.
 If catalog is a string, treat it as a path to an external file. Multiple catalogs complement each other.
 
+If a logic or code entry is prefixed with `STRICT:`
+- It becomes a deterministic algorithm specification.
+- The LLM must implement it exactly as described.
+- No generalization, abstraction, or architectural extension is allowed.
+- The logic must be treated as executable intent, not interpretative guidance.
+- Any deviation is considered an implementation error.
+
 .3 UNITS
 Each unit has an optional name, description (LLM-direct), references array, and a features object.
 
