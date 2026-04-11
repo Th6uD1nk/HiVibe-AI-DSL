@@ -179,7 +179,7 @@ An object where each key is the name of a unit. Units are the primary organizati
 
 #### `unit.references`
 
-An optional array of URLs or local paths. When present, the LLM must fetch and read every reference listed before generating any code for the unit. References are treated as authoritative external context — the LLM must not simulate or assume their content.
+An optional array of URLs or local paths. When present, the LLM must fetch and read every reference listed before generating any code for the unit. References are treated as authoritative external context, the LLM must not simulate or assume their content.
 
 If a reference cannot be fetched, the LLM must explicitly state it before proceeding.
 
