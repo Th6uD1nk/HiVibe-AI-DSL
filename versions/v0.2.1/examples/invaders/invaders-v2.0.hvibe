@@ -1,0 +1,722 @@
+{
+  hvibe_version: "0.2.1",
+  app: "invaders",
+  description: `a browser-based space invaders-style game on an HTML5 canvas, playable on desktop and mobile. the screen is divided into two exclusive zones. the sky zone above HORIZON_Y is where enemies live and player bullets travel. the band zone below HORIZON_Y is where the player ship lives. enemies form a V driven by group AI that scales with each wave. enemies may drift slightly outside canvas bounds but are pulled back. the player ship is always a triangle. enemies can be any shape but always have one or two eye holes. explosions are circular blasts that grow and fade out. player HP is shown top-left as heart icons`,
+  stack: [`javascript`, `html5 canvas`, `html`, `css`],
+
+  catalog: {
+    globals: `
+      let CANVAS_WIDTH  = window.innerWidth
+      let CANVAS_HEIGHT = window.innerHeight
+
+      const PLAYER_HEIGHT = 32
+      const PLAYER_WIDTH  = 48
+
+      const BAND_HEIGHT = Math.round(PLAYER_HEIGHT * 1.5)
+
+      let HORIZON_Y = CANVAS_HEIGHT - BAND_HEIGHT
+
+      let PLAYER_Y = HORIZON_Y + Math.floor((BAND_HEIGHT - PLAYER_HEIGHT) / 2)
+
+      const ENEMY_WIDTH  = 40
+      const ENEMY_HEIGHT = 28
+
+      let FORMATION_SAFE_Y = HORIZON_Y - ENEMY_HEIGHT - 20
+
+      const FORMATION_STEP_X = 70
+      const FORMATION_STEP_Y = 60
+
+      const OVERFLOW_TOLERANCE = Math.round(ENEMY_WIDTH * 1.5)
+
+      const PLAYER_SPEED  = 5
+      const PLAYER_MAX_HP = 5
+
+      const BULLET_WIDTH  = 6
+      const BULLET_HEIGHT = 16
+      const BULLET_SPEED  = 10
+
+      const EXPLOSION_INITIAL_RADIUS = 8
+      const EXPLOSION_FINAL_RADIUS   = 36
+      const EXPLOSION_DURATION_MS    = 400
+
+      let initialized = false
+    `,
+
+    logic: {
+
+      zone_rules: `
+        The canvas is split into two zones by the line at HORIZON_Y.
+
+        The sky zone is everything from y=0 down to y=HORIZON_Y minus one. Enemies live here. Player bullets travel upward through it. Clicking here fires a player bullet.
+
+        The band zone is everything from y=HORIZON_Y down to y=CANVAS_HEIGHT. The player ship lives here. Clicking here moves the ship and never fires a bullet.
+
+        Player vertical rule. Player.y MUST ALWAYS be greater than or equal to HORIZON_Y. It equals HORIZON_Y plus floor of BAND_HEIGHT minus PLAYER_HEIGHT divided by 2. This formula is recomputed on resize and the result is assigned directly to player.y. Player.y is never clamped, interpolated, or set by any other code.
+
+        Enemy vertical rule. For every living enemy, enemy.y plus ENEMY_HEIGHT MUST ALWAYS be strictly less than HORIZON_Y. Enemy.y MUST ALWAYS be zero or greater. These rules apply every frame including during oscillation.
+
+        FORMATION_SAFE_Y equals HORIZON_Y minus ENEMY_HEIGHT minus 20. The apex ship y MUST NEVER exceed this value. Because all other ships in the V are higher than the apex, clamping the apex guarantees every ship satisfies the enemy vertical rule.
+
+        On resize, recompute HORIZON_Y, BAND_HEIGHT, PLAYER_Y, and FORMATION_SAFE_Y in that order. Assign player.y equal to PLAYER_Y. Clamp player.x within horizontal bounds. Clamp formation.fy to be at most FORMATION_SAFE_Y.
+      `,
+
+      dead_enemy_rule: `
+        Dead enemies MUST stay in the enemies array for the entire wave. They are never removed mid-wave.
+
+        The reason is that each enemy's index in the array determines its V offset. If a dead enemy were removed, all subsequent indices would shift, breaking the V shape for surviving enemies.
+
+        The array is only replaced entirely when makeFormation is called for the next wave.
+
+        The apex index is always floor of the total array length divided by 2. Total length never changes during a wave. It MUST NOT be recomputed from the count of living enemies.
+
+        During drawing, collision detection, and fire logic, dead enemies are skipped by checking the alive flag. They are OTHERWISE ignored.
+
+        The wave clear check MUST count only living enemies. It should check whether every enemy in the array has alive equal to false, not whether the array is empty.
+      `,
+
+      enemy_bullet_collision: `
+        This logic describes exactly how to detect whether an enemy bullet has hit the player.
+
+        The player bounding box is a rectangle. Its left edge is player.x minus PLAYER_WIDTH divided by 2. Its right edge is player.x plus PLAYER_WIDTH divided by 2. Its top edge is player.y. Its bottom edge is player.y plus PLAYER_HEIGHT.
+
+        An enemy bullet has a position bullet.x and bullet.y, a width bullet.w, and a height bullet.h.
+
+        A hit is confirmed when all four of the following are true at the same time. The bullet right edge, which is bullet.x plus bullet.w, is greater than the player left edge. The bullet left edge, which is bullet.x, is less than the player right edge. The bullet bottom edge, which is bullet.y plus bullet.h, is greater than the player top edge, which is player.y. The bullet top edge, which is bullet.y, is less than the player bottom edge, which is player.y plus PLAYER_HEIGHT.
+
+        Written as a single condition: (bullet.x + bullet.w > player.x - PLAYER_WIDTH/2) AND (bullet.x < player.x + PLAYER_WIDTH/2) AND (bullet.y + bullet.h > player.y) AND (bullet.y < player.y + PLAYER_HEIGHT).
+
+        A common mistake is to write a condition like bullet.y greater than bullet.y which is always false and means the player can never be hit. The correct comparison is bullet.y plus bullet.h greater than player.y.
+
+        When a hit is confirmed, the enemy bullet MUST BE removed from the array immediately so it cannot deal damage again in the same frame. Then player.hp is reduced by 1. Then a damage explosion is spawned at the player position. Then if player.hp is zero or less, game over is triggered.
+      `,
+
+      enemy_firing: `
+        Enemy fire is only possible when W is 3 or higher. If W is below 3, no enemy fires under any circumstances. This gate MUST BE checked before any fire logic runs.
+
+        When firing is enabled, each living enemy in the formation manages an independent fire timer. The timer is stored on the enemy object itself as two fields: lastFired, which is a timestamp, and fireInterval, which is the duration in milliseconds before the next shot.
+
+        At wave spawn when W is 3 or higher, each enemy's lastFired MUST BE set to the current time plus a random offset between 0 and one full base fire interval. This staggering prevents all enemies from firing simultaneously on the first tick.
+
+        The base fire interval for the current wave is computed as max(3000, 8000 minus 800 times W minus 3). This is only called when W is 3 or higher.
+
+        Each frame, for each living enemy, check whether the time elapsed since lastFired is greater than or equal to the enemy's fireInterval. If so, spawn an enemy bullet at the enemy's horizontal center x position and at the enemy's bottom edge y position. Then set lastFired to now. Then set fireInterval to the base interval times a random value between 0.8 and 1.2.
+
+        Enemy fire logic MUST exist in the frame loop as explicit code. It MUST NOT be omitted.
+      `,
+
+      overflow_and_return: `
+        Enemies are allowed to drift past the canvas edge by up to OVERFLOW_TOLERANCE pixels, which is 1.5 times ENEMY_WIDTH. Beyond that limit, the AI MUST force a return.
+
+        The overflow check MUST run every frame after applying the horizontal drift, not only at the aiThink interval. This is important because at high wave speeds the formation can travel far between think intervals and exceed the tolerance by a large margin if the check is deferred.
+
+        After applying drift each frame, compute leftEdge as the x position of the leftmost living enemy. Compute rightEdge as the x plus ENEMY_WIDTH of the rightmost living enemy. If leftEdge is less than negative OVERFLOW_TOLERANCE, force the AI direction to 1 immediately. If rightEdge is greater than CANVAS_WIDTH plus OVERFLOW_TOLERANCE, force the AI direction to negative 1 immediately. These forced corrections apply on the current frame and override any previous direction.
+
+        The formation returns by continuing to drift normally in the corrected direction. There is no teleport, no snap, and no special acceleration. The speed stays the same.
+      `,
+
+      init_order: `
+        All game objects MUST exist before any function can access them. This sequence is mandatory and MUST NOT be reordered.
+
+        Step 1: get the canvas element and its 2d rendering context.
+        Step 2: compute CANVAS_WIDTH, CANVAS_HEIGHT, HORIZON_Y, BAND_HEIGHT, PLAYER_Y, and FORMATION_SAFE_Y.
+        Step 3: create the player object with x equal to CANVAS_WIDTH divided by 2, y equal to PLAYER_Y, targetX equal to CANVAS_WIDTH divided by 2, and hp equal to PLAYER_MAX_HP.
+        Step 4: create the game state object with W equal to 1 and running equal to false.
+        Step 5: compute wave 1 parameters using the wave_progression formulas with W equal to 1.
+        Step 6: build the wave 1 formation using v_formation_dynamic with N equal to 5.
+        Step 7: create the AI state object with direction equal to 1, lastThink equal to 0, speed equal to aiSpeed(1), and thinkMs equal to aiThinkMs(1).
+        Step 8: create empty arrays for playerBullets, enemyBullets, and effects.
+        Step 9: set initialized to true.
+        Step 10: attach event listeners for click, touchstart, and resize.
+        Step 11: call resizeCanvas once.
+        Step 12: set game.running to true and start the requestAnimationFrame loop.
+
+        The resizeCanvas function MUST check whether initialized is false and return immediately if so.
+      `,
+
+      wave_progression: `
+        The game tracks a wave index W starting at 1. It increments by 1 each time the player clears the wave. All difficulty values derive from W with no lookup table.
+
+        Enemy count: min(3 + 2 * W, 15).
+
+        AI horizontal speed in pixels per frame: min(1.8 + 0.35 * (W - 1), 5.0).
+
+        AI direction re-evaluation delay in milliseconds: max(600, 2000 - 200 * (W - 1)).
+
+        Movement pattern index: min(W - 1, 3). Wave 1 uses pattern 0, wave 2 uses pattern 1, waves 3 and 4 use pattern 2, wave 5 and above use pattern 3.
+
+        Enemy fire is disabled for waves 1 and 2. From wave 3 onward each enemy fires independently. Base fire interval: max(3000, 8000 - 800 * (W - 3)) milliseconds.
+
+        When the last enemy dies: increment W, compute new parameters, build new formation, clear all bullets, reset wave timer. Do not reset player.hp or player position.
+      `,
+
+      v_formation_dynamic: `
+        The formation is always a V shape regardless of enemy count N.
+
+        The apex is the ship at the lowest screen position, meaning the largest Y value. Its array index is floor of N divided by 2. The total N used for this calculation is the length of the enemies array at the moment of wave spawn. This value is fixed for the entire wave and MUST NOT be recalculated from surviving enemies.
+
+        For each ship at index i, compute offset as i minus the apex index. Ship.x equals fx plus offset times stepX. Ship.y equals fy minus the absolute value of offset times FORMATION_STEP_Y.
+
+        The default stepX is FORMATION_STEP_X. Scale it down proportionally if the full spread would exceed the canvas bounds accounting for OVERFLOW_TOLERANCE.
+
+        After computing positions, verify every living ship satisfies ship.y plus ENEMY_HEIGHT less than HORIZON_Y. If any fails, reduce fy and recompute.
+
+        Initial anchor: fx equals CANVAS_WIDTH divided by 2, fy equals HORIZON_Y minus 100. Clamp fy to be at most FORMATION_SAFE_Y before computing positions.
+      `,
+
+      movement_patterns: `
+        After horizontal drift is applied each frame, the movement pattern modifies fy based on elapsed milliseconds since wave start.
+
+        Pattern 0 for wave 1: fy does not change.
+
+        Pattern 1 for wave 2: fy = fy_base + 20 * sin(2 * pi * elapsed / 4000), where fy_base is recorded at wave spawn.
+
+        Pattern 2 for waves 3 and 4: amplitude 35, period 3000ms.
+
+        Pattern 3 for wave 5 and above: fy = fy_base + 40 * sin(2 * pi * elapsed / 3000). A secondary rendering offset equals 30 * cos(2 * pi * elapsed / 5000). This offset applies only to drawing and collision positions, not to the true fx anchor.
+
+        After applying any pattern, clamp fy to be at most FORMATION_SAFE_Y. This runs every frame.
+      `,
+
+      ai_group_movement: `
+        Every frame the formation drifts by adding aiSpeed times direction to fx.
+
+        Every aiThinkMs milliseconds the AI picks a direction. If leftEdge is below negative OVERFLOW_TOLERANCE, force direction to 1. If rightEdge exceeds CANVAS_WIDTH plus OVERFLOW_TOLERANCE, force direction to negative 1. Otherwise apply player_bias.
+
+        After every frame of drift, regardless of the think interval, check leftEdge and rightEdge again. If the overflow limit is exceeded, force direction immediately. This per-frame check prevents the formation from drifting too far between think intervals at high speeds.
+      `,
+
+      player_bias: `
+        Called when direction is not forced by overflow.
+
+        Generate a random number between 0 and 1. If it is below 0.70, move toward player.x: direction is 1 if player.x is greater than fx, negative 1 OTHERWISE. If 0.70 or above, pick 1 or negative 1 with equal probability.
+      `,
+
+      player_move: `
+        On every click or touchstart, store event.clientX as player.targetX regardless of zone.
+
+        Every frame: player.x = player.x + (player.targetX - player.x) * 0.12. Then clamp player.x between PLAYER_WIDTH divided by 2 and CANVAS_WIDTH minus PLAYER_WIDTH divided by 2.
+
+        Never modify player.y here.
+      `,
+
+      shoot_on_click: `
+        On every click or touchstart, read event.clientY. If clientY is strictly less than HORIZON_Y, spawn one player bullet at x equal to player.x and y equal to HORIZON_Y minus 1. If clientY is HORIZON_Y or greater, no bullet is spawned.
+      `,
+
+      hud_rendering: `
+        The HUD is drawn last every frame, after all game elements.
+
+        Player HP is drawn as heart icons in the top-left corner. Each heart is a small filled circle or heart shape. There is one icon per remaining hit point. The icons are spaced horizontally starting at approximately x=20 y=20.
+
+        The wave number is drawn as text in the top-right area. Before calling fillText, the font MUST BE set explicitly on the canvas context, for example ctx.font equal to "16px sans-serif". Without setting font, the text may be invisible or incorrectly sized.
+
+        Both the HP icons and the wave text MUST BE drawn with globalAlpha reset to 1 before rendering. If an explosion has set globalAlpha to a value below 1 and it is not restored, the HUD will be drawn semi-transparent.
+      `,
+
+      explosion_effect: `
+        An explosion object has an x position, a y position, a birthTime timestamp, and a type that is either "hit" for bullet-on-enemy or "damage" for enemy-on-player.
+
+        To draw an explosion: compute progress as the time since birthTime divided by EXPLOSION_DURATION_MS, clamped between 0 and 1. Compute radius as EXPLOSION_INITIAL_RADIUS plus the difference between EXPLOSION_FINAL_RADIUS and EXPLOSION_INITIAL_RADIUS times progress. Set globalAlpha to 1 minus progress. Draw a filled circle at the explosion position with the computed radius. A hit explosion uses bright orange-yellow. A damage explosion uses red.
+
+        After drawing all explosions, globalAlpha MUST BE reset to 1 before drawing anything else.
+
+        Explosions are removed from the effects array when progress reaches 1.
+
+        Explosions are purely visual and have no effect on gameplay or collision.
+      `
+    },
+
+    tests: {
+      player_always_in_band:      `GIVEN any frame or input, player.y MUST ALWAYS equal PLAYER_Y, satisfying PLAYER_Y >= HORIZON_Y and PLAYER_Y + PLAYER_HEIGHT <= CANVAS_HEIGHT`,
+      player_never_in_sky:        `GIVEN any frame, player.y MUST ALWAYS be >= HORIZON_Y so the ship never appears above the band zone`,
+      enemies_always_in_sky:      `GIVEN any living enemy on any frame, enemy.y + ENEMY_HEIGHT MUST ALWAYS be strictly less than HORIZON_Y`,
+      enemies_never_in_band:      `GIVEN any living enemy, enemy.y + ENEMY_HEIGHT MUST NEVER be >= HORIZON_Y even during oscillation`,
+      dead_enemies_stay_in_array: `GIVEN an enemy being destroyed mid-wave, it MUST remain in the enemies array with alive set to false until the wave ends`,
+      apex_index_fixed:           `GIVEN N enemies at wave spawn, the apex index MUST ALWAYS equal floor(N / 2) using the original N, never the count of living enemies`,
+      enemy_bullet_hit_detection: `GIVEN an enemy bullet whose bounding box overlaps the player bounding box using the correct four-sided AABB check, player.hp MUST decrease by exactly 1 and the bullet MUST BE removed`,
+      enemy_bullet_condition:     `GIVEN the enemy bullet collision check, the condition MUST compare bullet.y + bullet.h against player.y, not bullet.y against bullet.y`,
+      overflow_tolerance:         `GIVEN the formation drifting past the canvas edge, it may exceed the edge by at most OVERFLOW_TOLERANCE pixels before direction is forced to reverse`,
+      overflow_per_frame:         `GIVEN the formation exceeding OVERFLOW_TOLERANCE on any frame, the direction MUST BE corrected on that same frame, not deferred to the next aiThink interval`,
+      overflow_return:            `GIVEN a forced return direction, the formation MUST drift back naturally at normal speed with no teleport`,
+      band_click_no_fire:         `GIVEN a click where clientY >= HORIZON_Y, the player MUST NEVER spawn a bullet`,
+      sky_click_fires:            `GIVEN a click where clientY < HORIZON_Y, the player MUST spawn exactly one player bullet`,
+      player_bullet_cleanup:      `GIVEN a player bullet where bullet.y + BULLET_HEIGHT < 0, it MUST BE removed from playerBullets in the same frame`,
+      enemy_bullet_cleanup:       `GIVEN an enemy bullet where bullet.y > CANVAS_HEIGHT, it MUST BE removed from enemyBullets in the same frame`,
+      formation_rigid:            `GIVEN any AI movement, all living enemies MUST maintain their relative V offsets from fx and fy`,
+      init_guard:                 `GIVEN page load, resizeCanvas MUST NOT access any game object before initialized is true`,
+      no_fire_w1_w2:              `GIVEN W equal to 1 or 2, enemyBullets MUST NEVER receive a new bullet`,
+      fire_enabled_w3:            `GIVEN W >= 3, at least one enemy MUST fire within two fire intervals of wave start`,
+      enemy_fire_exists:          `GIVEN W >= 3, the frame loop MUST contain explicit code that checks each living enemy's fire timer and spawns enemy bullets. this logic MUST NOT be omitted`,
+      wave_clears:                `GIVEN every enemy having alive equal to false, W MUST increment and a new formation MUST spawn in the same frame`,
+      wave_enemy_count:           `GIVEN wave W, the formation MUST contain exactly min(3 + 2 * W, 15) enemies`,
+      hp_damage:                  `GIVEN an enemy bullet hitting the player, player.hp MUST decrease by exactly 1`,
+      hp_floor:                   `GIVEN player.hp at 1 and a hit, hp MUST become 0 and game over MUST trigger`,
+      hp_no_wave_reset:           `GIVEN a new wave spawning, player.hp MUST carry over unchanged`,
+      game_over_stops_loop:       `GIVEN player.hp reaching 0, the RAF loop MUST BE cancelled immediately`,
+      player_is_triangle:         `GIVEN any frame, the player ship MUST ALWAYS be drawn as a triangle pointing upward`,
+      enemies_have_eyes:          `GIVEN any living enemy drawn on any frame, it MUST have one or two dark circular cutouts on its body representing eyes`,
+      hp_display_top_left:        `GIVEN any frame, player.hp MUST BE shown as heart icons in the top-left corner of the canvas`,
+      hud_font_set:               `GIVEN HUD text rendering, ctx.font MUST BE explicitly set before any ctx.fillText call so wave text is visible`,
+      hud_alpha_reset:            `GIVEN explosions using ctx.globalAlpha, globalAlpha MUST BE reset to 1 before the HUD is drawn so icons and text are not semi-transparent`,
+      explosion_grows_fades:      `GIVEN an explosion spawned at time T, its radius MUST grow from EXPLOSION_INITIAL_RADIUS to EXPLOSION_FINAL_RADIUS and its alpha MUST decrease from 1 to 0 over EXPLOSION_DURATION_MS milliseconds`,
+      explosion_removed:          `GIVEN an explosion whose age exceeds EXPLOSION_DURATION_MS, it MUST BE removed from effects in the same frame`,
+      explosion_alpha_restored:   `GIVEN that explosions set ctx.globalAlpha during drawing, globalAlpha MUST BE restored to 1 immediately after the last explosion is drawn and before any other element is rendered`
+    }
+  },
+
+  units: {
+
+    world: {
+      name: "World",
+      description: `creates the canvas and defines the two visual zones. owns HORIZON_Y and BAND_HEIGHT. all other units read these values and never redefine them`,
+      features: {
+
+        canvas_setup: {
+          description: `creates a full-viewport canvas. on resize recomputes all layout values and repositions player and formation. guarded by the initialized flag`,
+          inputs: [`page load`, `window resize event`],
+          blueprints: [`catalog.logic.init_order`],
+          tests: ["catalog.tests.init_guard"],
+          rules: {
+            constraints: {
+              init_guard:  `resizeCanvas MUST check initialized and return immediately if it is false`,
+              call_order:  `resizeCanvas MUST NOT be called before initialized is set to true`,
+              player_y:    `after resize, player.y MUST BE assigned PLAYER_Y directly with no clamping or interpolation`,
+              fy_clamp:    `after resize, formation.fy MUST BE clamped to be at most FORMATION_SAFE_Y`
+            }
+          }
+        },
+
+        sky_zone: {
+          description: `upper zone from y=0 to y=HORIZON_Y minus one. enemies live here. player bullets travel upward here. clicking here fires`,
+          inputs: [`world initialization`, `frame update`],
+          rules: {
+            obligations: {
+              color:  `MUST BE filled with deep navy or near-black`,
+              extent: `MUST fill exactly from y=0 to y=HORIZON_Y`
+            }
+          }
+        },
+
+        horizon_band: {
+          description: `lower zone from y=HORIZON_Y to y=CANVAS_HEIGHT. height is BAND_HEIGHT. player ship is vertically centered inside it. clicking here moves the ship and never fires`,
+          inputs: [`world initialization`, `frame update`],
+          rules: {
+            obligations: {
+              y_start: `MUST start at y=HORIZON_Y`,
+              height:  `MUST BE exactly BAND_HEIGHT pixels tall`,
+              color:   `MUST use a color visually distinct from the sky zone`
+            },
+            constraints: {
+              no_enemies: `no enemy ship MUST ever appear in this zone`
+            }
+          }
+        }
+      }
+    },
+
+    player: {
+      name: "Player",
+      description: `the player-controlled ship. lives in the band zone. always drawn as a triangle. moves horizontally. tracks hit points`,
+      features: {
+
+        ship: {
+          description: `always drawn as a triangle pointing upward. the tip is at the top of the ship at coordinates player.x and player.y. the two base corners are at player.y plus PLAYER_HEIGHT, spread left and right by PLAYER_WIDTH divided by 2. this means the tip is the highest point on screen and the base is the lowest`,
+          inputs: [`game initialization`, `frame update`],
+          tests: ["catalog.tests.player_always_in_band", "catalog.tests.player_never_in_sky", "catalog.tests.player_is_triangle"],
+          rules: {
+            obligations: {
+              shape:     `MUST ALWAYS be drawn as a triangle with the tip pointing up toward the sky zone`,
+              y_formula: `player.y MUST ALWAYS equal HORIZON_Y + floor((BAND_HEIGHT - PLAYER_HEIGHT) / 2)`,
+              start_x:   `player.x MUST equal CANVAS_WIDTH / 2 at game start and on restart`
+            },
+            constraints: {
+              y_immutable: `player.y MUST NEVER be modified by click handlers, lerp, or animation. only the resize handler may update it`,
+              x_bounds:    `player.x MUST stay between PLAYER_WIDTH / 2 and CANVAS_WIDTH minus PLAYER_WIDTH / 2`,
+              zone_lock:   `the triangle MUST NEVER be drawn above HORIZON_Y`
+            }
+          }
+        },
+
+        movement: {
+          description: `smooth horizontal lerp toward the last click or tap x position every frame. applies to both zones`,
+          inputs: [`click event`, `touchstart event`, `frame update`],
+          blueprints: [`catalog.logic.player_move`],
+          tests: ["catalog.tests.band_click_no_fire"],
+          rules: {
+            obligations: {
+              lerp:  `MUST apply player.x = player.x + (player.targetX - player.x) * 0.12 every frame`,
+              clamp: `MUST clamp player.x after the lerp`
+            },
+            constraints: {
+              y_untouched: `MUST NEVER modify player.y`
+            }
+          }
+        },
+
+        firing: {
+          description: `spawns one player bullet per click when the click is in the sky zone. zone check is mandatory on every click`,
+          inputs: [`click event`, `touchstart event`],
+          blueprints: [`catalog.logic.shoot_on_click`],
+          tests: ["catalog.tests.band_click_no_fire", "catalog.tests.sky_click_fires"],
+          rules: {
+            constraints: {
+              zone_gate:     `MUST check that clientY is strictly less than HORIZON_Y before spawning any bullet`,
+              bullet_origin: `bullet MUST start at y equal to HORIZON_Y minus 1, not at player.y`
+            }
+          }
+        },
+
+        hp: {
+          description: `player starts with 5 hit points. each enemy bullet collision reduces hp by 1. hp never resets on wave transition. reaching 0 triggers game over. displayed as heart icons top-left`,
+          inputs: [`enemy bullet collision event`, `game initialization`, `restart event`],
+          tests: ["catalog.tests.hp_damage", "catalog.tests.hp_floor", "catalog.tests.hp_no_wave_reset", "catalog.tests.game_over_stops_loop", "catalog.tests.hp_display_top_left"],
+          rules: {
+            obligations: {
+              init:    `player.hp MUST BE set to PLAYER_MAX_HP at game start and on restart`,
+              display: `player.hp MUST BE shown as heart icons in the top-left corner every frame`
+            },
+            constraints: {
+              no_regen:      `player.hp MUST NEVER increase`,
+              floor_zero:    `player.hp MUST NEVER go below 0`,
+              no_wave_reset: `player.hp MUST NOT be reset when a new wave spawns`
+            }
+          }
+        }
+      }
+    },
+
+    projectiles: {
+      name: "Projectiles",
+      description: `two distinct bullet types. player bullets go upward. enemy bullets go downward`,
+      features: {
+
+        player_bullet: {
+          description: `orange-yellow elongated pill. moves upward at BULLET_SPEED pixels per frame. starts at player.x and HORIZON_Y minus 1. removed when it exits the canvas top`,
+          inputs: [`firing event`, `frame update`],
+          tests: ["catalog.tests.sky_click_fires", "catalog.tests.player_bullet_cleanup"],
+          rules: {
+            obligations: {
+              direction: `MUST move upward by subtracting BULLET_SPEED from y each frame`,
+              origin:    `MUST start at y equal to HORIZON_Y minus 1`
+            },
+            constraints: {
+              removal: `MUST BE removed when y plus BULLET_HEIGHT is less than 0`
+            }
+          }
+        },
+
+        enemy_bullet: {
+          description: `red or orange small rectangle. moves downward at 4 pixels per frame. spawned at enemy center x and enemy bottom y. only from wave 3 onward. each enemy has its own staggered fire timer. removed when it exits the canvas bottom or hits the player`,
+          inputs: [`frame update`, `enemy fire timer`],
+          blueprints: [`catalog.logic.enemy_firing`],
+          tests: ["catalog.tests.no_fire_w1_w2", "catalog.tests.fire_enabled_w3", "catalog.tests.enemy_fire_exists", "catalog.tests.enemy_bullet_cleanup"],
+          rules: {
+            obligations: {
+              direction:   `MUST move downward by adding 4 to y each frame`,
+              jitter:      `each enemy MUST have its own fireInterval set to the base interval times a random value between 0.8 and 1.2`,
+              must_exist:  `the frame loop MUST contain explicit enemy fire code. it MUST NOT be omitted even if W is below 3, because the gate check handles that case`
+            },
+            constraints: {
+              wave_gate:   `MUST NEVER spawn if W is less than 3`,
+              removal:     `MUST BE removed when y exceeds CANVAS_HEIGHT or when it hits the player`
+            }
+          },
+          depends_on: [
+            { feature: `enemy_ship`, when: [`the enemy is alive`, `W is 3 or higher`] }
+          ]
+        }
+      }
+    },
+
+    effects: {
+      name: "Effects",
+      description: `visual-only explosion circles that grow and fade. spawned on bullet hits. no gameplay effect`,
+      features: {
+
+        explosion: {
+          description: `a circle that spawns at the impact point. grows from EXPLOSION_INITIAL_RADIUS to EXPLOSION_FINAL_RADIUS. fades from alpha 1 to alpha 0. removed after EXPLOSION_DURATION_MS. two color variants: orange-yellow for enemy hits, red for player hits`,
+          inputs: [`bullet-enemy collision event`, `enemy-bullet-player collision event`, `frame update`],
+          blueprints: [`catalog.logic.explosion_effect`],
+          tests: ["catalog.tests.explosion_grows_fades", "catalog.tests.explosion_removed", "catalog.tests.explosion_alpha_restored", "catalog.tests.hud_alpha_reset"],
+          rules: {
+            obligations: {
+              grow:         `radius MUST grow linearly from initial to final over the duration`,
+              fade:         `alpha MUST decrease linearly from 1 to 0 over the duration`,
+              restore_alpha:`ctx.globalAlpha MUST BE reset to 1 immediately after drawing all explosions, before drawing any other element`
+            },
+            constraints: {
+              no_gameplay:  `explosions MUST NEVER influence collision, game logic, or any other system`
+            }
+          }
+        }
+      }
+    },
+
+    waves: {
+      name: "Waves",
+      description: `manages the wave lifecycle. detects when all enemies are dead, increments W, computes new parameters, spawns the next formation`,
+      features: {
+
+        wave_manager: {
+          description: `checks every frame whether all enemies have alive equal to false. when they do, increments W, computes new parameters, triggers formation_spawn, clears both bullet arrays, resets wave timer. does not touch player.hp or player position`,
+          inputs: [`frame update`],
+          blueprints: [`catalog.logic.wave_progression`],
+          tests: ["catalog.tests.wave_clears", "catalog.tests.wave_enemy_count", "catalog.tests.hp_no_wave_reset"],
+          rules: {
+            obligations: {
+              detect:     `MUST check every frame whether all enemies in the array have alive equal to false`,
+              increment:  `MUST increment W in the same frame the last enemy dies`,
+              spawn:      `MUST build a new formation in that same frame`,
+              clear_ammo: `MUST empty playerBullets and enemyBullets on each wave transition`,
+              timer:      `MUST reset the elapsed wave timer to 0`
+            },
+            constraints: {
+              no_table:     `MUST NOT use a per-wave data table`,
+              hp_untouched: `MUST NOT touch player.hp`
+            }
+          }
+        },
+
+        formation_spawn: {
+          description: `builds the V formation for the current W. computes N, places ships using v_formation_dynamic, resets anchor, clamps fy, resets AI state with new speed and think delay, resets wave timer`,
+          inputs: [`wave_manager clear signal`],
+          blueprints: [`catalog.logic.v_formation_dynamic`, `catalog.logic.wave_progression`, `catalog.logic.dead_enemy_rule`],
+          tests: ["catalog.tests.enemies_always_in_sky", "catalog.tests.enemies_never_in_band", "catalog.tests.formation_rigid", "catalog.tests.dead_enemies_stay_in_array", "catalog.tests.apex_index_fixed"],
+          rules: {
+            obligations: {
+              anchor_reset: `MUST set fx to CANVAS_WIDTH / 2 and fy to HORIZON_Y - 100 each wave`,
+              fy_clamp:     `MUST clamp fy to be at most FORMATION_SAFE_Y immediately after setting the anchor`,
+              zone_verify:  `MUST confirm every ship satisfies ship.y + ENEMY_HEIGHT < HORIZON_Y after placement`,
+              timer_reset:  `MUST reset elapsed wave time to 0`
+            }
+          },
+          depends_on: [
+            { feature: `wave_manager`, when: [`W has been incremented`] }
+          ]
+        }
+      }
+    },
+
+    enemies: {
+      name: "Enemies",
+      description: `the active set of enemy ships. all live in the sky zone. positions derive from the formation anchor. dead enemies stay in the array mid-wave`,
+      features: {
+
+        formation: {
+          description: `the formation object holds the anchor fx and fy and the enemies array. each enemy has x, y, alive, lastFired, and fireInterval. x and y are recomputed every frame from the anchor after AI updates. dead enemies stay in the array with alive equal to false`,
+          inputs: [`wave spawn event`, `frame update`],
+          blueprints: [`catalog.logic.v_formation_dynamic`, `catalog.logic.dead_enemy_rule`],
+          tests: ["catalog.tests.formation_rigid", "catalog.tests.enemies_always_in_sky", "catalog.tests.dead_enemies_stay_in_array", "catalog.tests.apex_index_fixed"],
+          rules: {
+            obligations: {
+              recompute:   `MUST recompute every enemy x and y from the anchor every frame after drift and pattern are applied`,
+              anchor_only: `the AI MUST only modify fx and fy. enemy x and y are always derived from the anchor`
+            }
+          }
+        },
+
+        enemy_ship: {
+          description: `each enemy is drawn as a polygon of any shape with one or two dark eye holes. wave color alternates by W modulo 3: 0 gives acid green, 1 gives red, 2 gives purple. destroyed enemies have alive set to false and are skipped during draw and fire. they are never removed from the array mid-wave`,
+          inputs: [`frame update`, `bullet collision event`],
+          tests: ["catalog.tests.enemies_always_in_sky", "catalog.tests.enemies_never_in_band", "catalog.tests.enemies_have_eyes"],
+          rules: {
+            obligations: {
+              eyes:       `every enemy drawn on screen MUST have one or two dark filled circles on its body as eye holes`,
+              wave_color: `enemy fill color MUST BE determined by W modulo 3`
+            },
+            constraints: {
+              sky_only:   `enemy.y + ENEMY_HEIGHT MUST BE strictly less than HORIZON_Y every frame`,
+              no_band:    `MUST NEVER enter the band zone`,
+              no_removal: `dead enemies MUST NOT be removed from the enemies array until the wave ends`
+            }
+          },
+          depends_on: [
+            { feature: `formation`, when: [`position is derived from the formation anchor`] }
+          ]
+        }
+      }
+    },
+
+    ai: {
+      name: "AI",
+      description: `group intelligence that moves the formation. horizontal drift with limited overflow. vertical oscillation patterns. scales with W`,
+      features: {
+
+        group_steering: {
+          description: `moves the formation by adding aiSpeed times direction to fx every frame. re-evaluates direction every aiThinkMs milliseconds. also checks overflow every frame after drift and forces a return direction if the tolerance is exceeded`,
+          inputs: [`frame update`],
+          blueprints: [`catalog.logic.ai_group_movement`, `catalog.logic.overflow_and_return`],
+          tests: ["catalog.tests.overflow_tolerance", "catalog.tests.overflow_per_frame", "catalog.tests.overflow_return"],
+          rules: {
+            obligations: {
+              drift:          `MUST add aiSpeed times direction to fx every frame`,
+              think_eval:     `MUST re-evaluate direction every aiThinkMs milliseconds`,
+              overflow_check: `MUST check leftEdge and rightEdge every frame after applying drift and correct direction immediately if tolerance is exceeded`
+            },
+            constraints: {
+              no_snap:  `MUST NEVER teleport or snap the formation. return happens by continuing drift in the corrected direction`,
+              fy_scope: `MUST NOT modify fy`
+            }
+          },
+          depends_on: [
+            { feature: `formation`, when: [`formation.fx is accessible`] }
+          ]
+        },
+
+        player_bias: {
+          description: `used when direction is not overflow-forced. 70 percent chance to move toward player.x, 30 percent random`,
+          inputs: [`direction decision event`],
+          blueprints: [`catalog.logic.player_bias`],
+          rules: {
+            constraints: {
+              randomness: `MUST keep the 30 percent random component`
+            }
+          },
+          depends_on: [
+            { feature: `group_steering`, when: [`direction is not overflow-forced`] }
+          ]
+        },
+
+        movement_patterns: {
+          description: `applies vertical oscillation to fy after horizontal drift. pattern index is min(W - 1, 3) cached at wave spawn. always clamps fy to FORMATION_SAFE_Y after applying the formula`,
+          inputs: [`frame update`, `elapsed wave time`, `W`],
+          blueprints: [`catalog.logic.movement_patterns`],
+          tests: ["catalog.tests.enemies_always_in_sky", "catalog.tests.enemies_never_in_band"],
+          rules: {
+            obligations: {
+              pattern_index:   `MUST compute patternIndex as min(W - 1, 3) at wave spawn and cache it`,
+              fy_clamp_always: `MUST clamp fy to be at most FORMATION_SAFE_Y every frame after applying the pattern`
+            },
+            constraints: {
+              no_horizontal: `MUST NOT modify fx`
+            }
+          },
+          depends_on: [
+            { feature: `group_steering`, when: [`horizontal drift has already been applied this frame`] }
+          ]
+        }
+      }
+    },
+
+    collision: {
+      name: "Collision",
+      description: `two AABB collision checks per frame. player bullets against enemies. enemy bullets against the player. spawns explosions on hits`,
+      features: {
+
+        bullet_enemy: {
+          description: `every frame, tests each active player bullet against each living enemy. on overlap: remove bullet, set enemy.alive to false, spawn a hit explosion`,
+          inputs: [`frame update`],
+          rules: {
+            obligations: {
+              every_frame: `MUST run every frame`,
+              both_remove: `MUST remove the bullet and set enemy.alive to false on a confirmed hit`,
+              spawn_hit:   `MUST add a hit explosion to effects at the impact position`
+            }
+          },
+          depends_on: [
+            { feature: `player_bullet`, when: [`bullet is active`] },
+            { feature: `enemy_ship`,    when: [`enemy.alive is true`] },
+            { feature: `explosion`,     when: [`a hit is confirmed`] }
+          ]
+        },
+
+        enemy_bullet_player: {
+          description: `every frame, tests each active enemy bullet against the player bounding box. the correct AABB condition is: bullet.x + bullet.w greater than player.x minus PLAYER_WIDTH divided by 2, AND bullet.x less than player.x plus PLAYER_WIDTH divided by 2, AND bullet.y + bullet.h greater than player.y, AND bullet.y less than player.y plus PLAYER_HEIGHT. on overlap: remove enemy bullet, reduce player.hp by 1, spawn damage explosion`,
+          inputs: [`frame update`],
+          blueprints: [`catalog.logic.enemy_bullet_collision`],
+          tests: ["catalog.tests.hp_damage", "catalog.tests.hp_floor", "catalog.tests.enemy_bullet_hit_detection", "catalog.tests.enemy_bullet_condition"],
+          rules: {
+            obligations: {
+              every_frame:    `MUST run every frame for all active enemy bullets`,
+              correct_aabb:   `MUST use the four-sided AABB condition described in catalog.logic.enemy_bullet_collision. the condition bullet.y + bullet.h > player.y is mandatory and MUST NOT be replaced with bullet.y > bullet.y`,
+              hp_subtract:    `MUST reduce player.hp by exactly 1 per confirmed hit`,
+              spawn_damage:   `MUST add a damage explosion to effects at the player position`
+            },
+            constraints: {
+              no_double_hit:  `MUST remove the enemy bullet immediately on hit so it cannot deal damage twice in the same frame`
+            }
+          },
+          depends_on: [
+            { feature: `enemy_bullet`, when: [`bullet is active`, `W is 3 or higher`] },
+            { feature: `hp`,           when: [`player.hp is greater than 0`] },
+            { feature: `explosion`,    when: [`a hit is confirmed`] }
+          ]
+        }
+      }
+    },
+
+    game_state: {
+      name: "Game State",
+      description: `game over detection, restart flow, and HUD`,
+      features: {
+
+        game_over: {
+          description: `triggered when player.hp reaches 0. cancels the RAF loop immediately. draws a full-canvas overlay with game over text, wave number reached, and restart instructions`,
+          inputs: [`player.hp change event`],
+          tests: ["catalog.tests.game_over_stops_loop"],
+          rules: {
+            obligations: {
+              cancel_raf: `MUST cancel requestAnimationFrame immediately when hp reaches 0`,
+              overlay:    `MUST draw the game over screen on the canvas`
+            },
+            constraints: {
+              no_continue: `MUST NEVER allow the RAF loop to run again until the player restarts`
+            }
+          },
+          depends_on: [
+            { feature: `hp`, when: [`player.hp equals 0`] }
+          ]
+        },
+
+        restart: {
+          description: `resets all game state: W to 1, player.hp to PLAYER_MAX_HP, player.x to center, all arrays emptied, wave 1 formation spawned, RAF loop restarted`,
+          inputs: [`restart button click`, `keyboard key press`],
+          rules: {
+            obligations: {
+              full_reset: `MUST reset W, player.hp, player.x, player.targetX, playerBullets, enemyBullets, effects, formation, and AI state`
+            },
+            constraints: {
+              clean_slate: `MUST NOT carry over any state from the previous run`
+            }
+          }
+        },
+
+        hud: {
+          description: `drawn last every frame after all game elements. shows player HP as heart icons in the top-left corner. shows wave number as text. requires ctx.font to be explicitly set before fillText. requires globalAlpha to be 1 before drawing`,
+          inputs: [`frame update`],
+          blueprints: [`catalog.logic.hud_rendering`],
+          tests: ["catalog.tests.hp_display_top_left", "catalog.tests.hud_font_set", "catalog.tests.hud_alpha_reset"],
+          rules: {
+            obligations: {
+              hp_top_left:   `player.hp MUST BE drawn as heart icons starting at approximately x=20 y=20`,
+              wave_label:    `wave number MUST BE drawn as text with ctx.font explicitly set before the fillText call`,
+              alpha_reset:   `ctx.globalAlpha MUST BE set to 1 before drawing any HUD element`
+            }
+          }
+        }
+      }
+    },
+
+    output: {
+      name: "Output",
+      description: `the requestAnimationFrame loop. controls draw order and loop lifecycle`,
+      features: {
+
+        render_loop: {
+          description: `each frame runs the following steps in order. step 1: clear the canvas. step 2: draw sky background. step 3: draw band background. step 4: lerp player.x. step 5: run AI drift. step 6: per-frame overflow check and correction. step 7: apply movement pattern and clamp fy. step 8: recompute all enemy positions from anchor. step 9: move player bullets and remove out-of-bounds. step 10: move enemy bullets and remove out-of-bounds. step 11: run enemy fire timers and spawn enemy bullets when W >= 3. step 12: run bullet-enemy collisions. step 13: run enemy-bullet-player collisions. step 14: check wave clear condition. step 15: draw living enemies with eye holes. step 16: draw player triangle. step 17: draw player bullets. step 18: draw enemy bullets. step 19: draw explosions and reset globalAlpha to 1. step 20: draw HUD`,
+          inputs: [`frame tick`],
+          rules: {
+            obligations: {
+              order: `MUST follow the 20-step order above without skipping or reordering any step`
+            },
+            constraints: {
+              halt_on_game_over:    `MUST NOT schedule a new RAF frame after game over`,
+              alpha_after_explode:  `globalAlpha MUST BE 1 after step 19 and before step 20 so the HUD is always fully opaque`
+            }
+          }
+        }
+      }
+    }
+
+  }
+}

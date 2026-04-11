@@ -19,6 +19,7 @@ Verify all catalog.tests and feature.tests mentally before finalizing. If a test
 Never skip, omit, or partially implement any feature.
 If a unit contains a references array, fetch and read each URL or path before generating. If unreachable, state it explicitly. Never simulate or assume reference content.
 Do not add any features that are not explicitly present in the provided .hvibe files.
+After generation, for each test defined in catalog.tests, evaluate whether the generated code satisfies it and return a report listing every test key followed by PASSED or FAILED.
 
 HIGHVIBE SPECIFICATION v0.2.1:
 
@@ -31,7 +32,7 @@ hvibe_version, app, description (LLM-direct), stack (LLM-direct, respect strictl
 .2 CATALOG — optional, global, all values LLM-direct
 logic: algorithms or conditions in natural language.
 code: literal code snippets, use as-is.
-tests: assertions to verify before finalizing, adjust until all pass. Keywords: MUST BE, MUST ALWAYS, MUST NEVER, OTHERWISE.
+tests: assertions to verify before finalizing, adjust until all pass. Keywords: GIVEN, MUST BE, MUST ALWAYS, MUST NEVER, MUST NOT, OTHERWISE.
 If catalog is a string, treat it as a path to an external catalog file. Multiple catalogs complement each other.
 
 If a logic or code entry is prefixed with `STRICT:`

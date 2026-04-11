@@ -22,6 +22,7 @@ Verify all catalog.tests and feature.tests mentally before finalizing. If a test
 Never skip, omit, or partially implement any feature.
 If a unit contains a references array, fetch and read each URL or path before generating. If unreachable, state it explicitly. Never simulate or assume reference content.
 Do not add any features that are not explicitly present in the provided .hvibe files.
+After generation, for each test defined in catalog.tests, evaluate whether the generated code satisfies it and return a report listing every test key followed by PASSED or FAILED.
 
 PRIORITY ORDER (highest to lowest):
 1. catalog.tests and feature.tests — must pass, non-negotiable
@@ -43,7 +44,7 @@ hvibe_version, app, description (LLM-direct), stack (LLM-direct, respect strictl
 globals: backtick field declaring shared constants and variables used across all features. Read first.
 logic: arrow functions with JSDoc comments. Treat as reasoning scaffolds.
 code: literal code snippets, use as-is only when explicitly marked as final.
-tests: arrow functions asserting passing conditions. Must pass before finalizing. Keywords: MUST BE, MUST ALWAYS, MUST NEVER, OTHERWISE.
+tests: arrow functions asserting passing conditions. Must pass before finalizing. Keywords: GIVEN, MUST BE, MUST ALWAYS, MUST NEVER, OTHERWISE.
 If catalog is a string, treat it as a path to an external file. Multiple catalogs complement each other.
 
 If a logic or code entry is prefixed with `STRICT:`

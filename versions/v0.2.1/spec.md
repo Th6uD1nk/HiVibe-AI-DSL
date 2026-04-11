@@ -149,19 +149,19 @@ catalog: {
 
 #### `catalog.tests`
 
-Tests are behavioral assertions the LLM must verify before finalizing the code of a feature. If a test does not pass, the LLM must adjust its generated code until it does. Tests use uppercase keywords combined with a `given` prefix to describe the condition.
+Tests are behavioral assertions the LLM must verify before finalizing the code of a feature. If a test does not pass, the LLM must adjust its generated code until it does. Tests use keywords combined with a `GIVEN` prefix to describe the condition.
 
 | Keyword | Meaning |
 |---------|---------|
 | `MUST BE` | the subject must have this property or state |
 | `MUST ALWAYS` | the subject must unconditionally respect this constraint |
-| `MUST NEVER` | the subject must unconditionally avoid this behavior |
+| `MUST NEVER` `MUST NOT`| the subject must unconditionally avoid this behavior |
 | `OTHERWISE` | consequence to apply if the rule is violated |
 
 ```js
 tests: {
-  generatePosition: `given a click at any point on the screen, the rocket MUST ALWAYS be generated at the bottom center regardless of click position`,
-  generateLimit:    `given 10 rockets already active, a new click MUST NEVER generate an 11th rocket`
+  generatePosition: `GIVEN a click at any point on the screen, the rocket MUST ALWAYS be generated at the bottom center regardless of click position`,
+  generateLimit:    `GIVEN 10 rockets already active, a new click MUST NEVER generate an 11th rocket`
 }
 ```
 
