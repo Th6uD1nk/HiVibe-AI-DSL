@@ -74,9 +74,10 @@
             },
             constraints: {
               gap:       `MUST NEVER spawn two consecutive platforms with a vertical gap greater than 140px or less than 80px`,
-              first_gap: `MUST NEVER spawn the first platform above the ground with a vertical gap greater than 100px`,
               scroll:    `MUST ALWAYS scroll the view upward to keep the character within the upper third of the visible screen`,
               spawn:     `MUST NEVER spawn a new platform if a platform already exists above the current viewport top`
+              first_gap: `MUST NEVER spawn the first platform above the ground with a vertical gap greater than 100px`,
+              reach:     `MUST NEVER spawn a platform whose horizontal distance from the previous platform center exceeds the horizontal distance the character can travel during a full jump arc`,
             }
           },
           tests: [

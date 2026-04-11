@@ -323,7 +323,18 @@
                   const maxJumpHeight = (JUMP_IMPULSE * JUMP_IMPULSE) / (2 * GRAVITY)
                   console.assert(PLATFORM_GAP_MAX <= maxJumpHeight)
                 }
-              `
+              `,
+              initial_count: `
+                // MUST ALWAYS generate enough platforms at game start to fill at least two screen heights above the ground line
+                const initial_count = () => {
+                  let currentY = groundY
+                  while (currentY > groundY - canvas.height * 2) {
+                    const gap = PLATFORM_GAP_MIN + Math.random() * (PLATFORM_GAP_MAX - PLATFORM_GAP_MIN)
+                    currentY -= gap
+                    platforms.push({ x: Math.random() * (canvas.width - 80), y: currentY, width: 80, height: 10 })
+                  }
+                }
+              `,
             },
             constraints: {
               gap: `
@@ -368,7 +379,16 @@
                   const firstPlatformY = groundY - firstGap
                   console.assert(firstPlatformY >= groundY - 100, 'first platform must be reachable')
                 }
-              `
+              `,
+              reach: `
+                // MUST NEVER spawn a platform whose horizontal distance from the previous platform center exceeds the horizontal distance the character can travel during a full jump arc
+                const reach = () => {
+                  const prevX = platforms[platforms.length - 1].x + 40
+                  const maxDelta = canvas.width * 0.6
+                  const newX = prevX - maxDelta + Math.random() * maxDelta * 2
+                  return Math.max(0, Math.min(canvas.width - 80, newX))
+                }
+              `,
             }
           },
           tests: [
