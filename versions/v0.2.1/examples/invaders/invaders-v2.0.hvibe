@@ -99,7 +99,11 @@
 
         The base fire interval for the current wave is computed as max(3000, 8000 minus 800 times W minus 3). This is only called when W is 3 or higher.
 
-        Each frame, for each living enemy, check whether the time elapsed since lastFired is greater than or equal to the enemy's fireInterval. If so, spawn an enemy bullet at the enemy's horizontal center x position and at the enemy's bottom edge y position. Then set lastFired to now. Then set fireInterval to the base interval times a random value between 0.8 and 1.2.
+        Each frame, for each enemy in the formation array, first check whether enemy.alive is true. If the enemy is dead, skip it entirely. A dead enemy MUST NEVER produce a bullet. Only living enemies may fire.
+
+        For each living enemy, check whether the time elapsed since lastFired is greater than or equal to the enemy's fireInterval. If so, spawn an enemy bullet using the enemy's current x and y position as the origin. The bullet starts at the enemy's horizontal center, which is enemy.x plus ENEMY_WIDTH divided by 2, and at the enemy's bottom edge, which is enemy.y plus ENEMY_HEIGHT. Then set lastFired to now and set a new fireInterval to the base interval times a random value between 0.8 and 1.2.
+
+        The bullet position is taken from the enemy's live x and y values computed this frame from the anchor. It MUST NOT use a stale or cached position from a previous frame.
 
         Enemy fire logic MUST exist in the frame loop as explicit code. It MUST NOT be omitted.
       `,
@@ -166,15 +170,19 @@
       movement_patterns: `
         After horizontal drift is applied each frame, the movement pattern modifies fy based on elapsed milliseconds since wave start.
 
-        Pattern 0 for wave 1: fy does not change.
+        The oscillation MUST stay subtle. The formation MUST NEVER leave the visible sky zone for more than a brief moment. The fy clamp applied after every pattern is the hard guarantee, but the amplitudes below are chosen to be conservative so the formation stays mostly on screen.
 
-        Pattern 1 for wave 2: fy = fy_base + 20 * sin(2 * pi * elapsed / 4000), where fy_base is recorded at wave spawn.
+        Pattern 0 for wave 1: fy does not change. The formation is purely horizontal.
 
-        Pattern 2 for waves 3 and 4: amplitude 35, period 3000ms.
+        Pattern 1 for wave 2: fy = fy_base + 15 * sin(2 * pi * elapsed / 6000), where fy_base is the fy value recorded at wave spawn and elapsed is milliseconds since wave start. Amplitude is 15 pixels, period is 6 seconds. This is a slow, barely noticeable drift.
 
-        Pattern 3 for wave 5 and above: fy = fy_base + 40 * sin(2 * pi * elapsed / 3000). A secondary rendering offset equals 30 * cos(2 * pi * elapsed / 5000). This offset applies only to drawing and collision positions, not to the true fx anchor.
+        Pattern 2 for waves 3 and 4: amplitude 25 pixels, period 5000ms. Formula: fy = fy_base + 25 * sin(2 * pi * elapsed / 5000).
 
-        After applying any pattern, clamp fy to be at most FORMATION_SAFE_Y. This runs every frame.
+        Pattern 3 for wave 5 and above: fy = fy_base + 30 * sin(2 * pi * elapsed / 4000). A secondary horizontal rendering offset equals 20 * cos(2 * pi * elapsed / 7000). This offset applies only to drawing and collision positions, not to the true fx anchor used by the AI drift.
+
+        After applying any pattern formula, ALWAYS clamp fy to be at most FORMATION_SAFE_Y. This clamp runs every frame without exception and is the final guarantee that enemies stay in the sky zone.
+
+        The vertical movement is a gentle oscillation, not an aggressive sweep. If any pattern would cause ships to leave the screen vertically, the fy clamp corrects it. The amplitudes above are sized so clamping is rarely needed.
       `,
 
       ai_group_movement: `
@@ -260,7 +268,11 @@
       hud_alpha_reset:            `GIVEN explosions using ctx.globalAlpha, globalAlpha MUST BE reset to 1 before the HUD is drawn so icons and text are not semi-transparent`,
       explosion_grows_fades:      `GIVEN an explosion spawned at time T, its radius MUST grow from EXPLOSION_INITIAL_RADIUS to EXPLOSION_FINAL_RADIUS and its alpha MUST decrease from 1 to 0 over EXPLOSION_DURATION_MS milliseconds`,
       explosion_removed:          `GIVEN an explosion whose age exceeds EXPLOSION_DURATION_MS, it MUST BE removed from effects in the same frame`,
-      explosion_alpha_restored:   `GIVEN that explosions set ctx.globalAlpha during drawing, globalAlpha MUST BE restored to 1 immediately after the last explosion is drawn and before any other element is rendered`
+      explosion_alpha_restored:   `GIVEN that explosions set ctx.globalAlpha during drawing, globalAlpha MUST BE restored to 1 immediately after the last explosion is drawn and before any other element is rendered`,
+      game_over_clickable:         `GIVEN the game over overlay is displayed, a click anywhere on the canvas MUST trigger the restart function and resume gameplay`,
+      no_dead_enemy_fire:          `GIVEN an enemy with alive equal to false, that enemy MUST NEVER produce a bullet under any circumstances`,
+      bullet_from_living_enemy:    `GIVEN an enemy bullet being spawned, its origin position MUST BE the current frame x and y of a living enemy, not a cached or dead enemy position`,
+      vertical_oscillation_gentle: `GIVEN any movement pattern applied to fy, the formation MUST remain mostly visible in the sky zone. amplitudes MUST NOT exceed 30 pixels and periods MUST NOT be shorter than 4000ms`
     }
   },
 
@@ -651,16 +663,18 @@
       features: {
 
         game_over: {
-          description: `triggered when player.hp reaches 0. cancels the RAF loop immediately. draws a full-canvas overlay with game over text, wave number reached, and restart instructions`,
+          description: `triggered when player.hp reaches 0. cancels the RAF loop immediately. draws a full-canvas semi-transparent overlay with game over text, wave number reached, and a clear instruction telling the player to click anywhere to restart. the overlay remains visible and static until the player clicks`,
           inputs: [`player.hp change event`],
-          tests: ["catalog.tests.game_over_stops_loop"],
+          tests: ["catalog.tests.game_over_stops_loop", "catalog.tests.game_over_clickable"],
           rules: {
             obligations: {
-              cancel_raf: `MUST cancel requestAnimationFrame immediately when hp reaches 0`,
-              overlay:    `MUST draw the game over screen on the canvas`
+              cancel_raf:  `MUST cancel requestAnimationFrame immediately when hp reaches 0`,
+              overlay:     `MUST draw a semi-transparent dark overlay on the full canvas, then draw game over text, the wave number reached, and the instruction "click to restart" centered on screen`,
+              click_hook:  `MUST attach a one-time click event listener to the canvas as soon as game over is triggered. when that click fires, the listener MUST remove itself and call the restart function`
             },
             constraints: {
-              no_continue: `MUST NEVER allow the RAF loop to run again until the player restarts`
+              no_continue:    `MUST NEVER allow the RAF loop to continue after game over`,
+              single_handler: `MUST attach only one click listener on game over. MUST NOT accumulate multiple listeners across repeated game overs`
             }
           },
           depends_on: [
@@ -669,11 +683,12 @@
         },
 
         restart: {
-          description: `resets all game state: W to 1, player.hp to PLAYER_MAX_HP, player.x to center, all arrays emptied, wave 1 formation spawned, RAF loop restarted`,
-          inputs: [`restart button click`, `keyboard key press`],
+          description: `resets all game state to initial values and restarts the RAF loop. triggered by a click on the canvas during the game over screen, or by a keyboard key press such as R or Space`,
+          inputs: [`canvas click during game over`, `keyboard key press`],
           rules: {
             obligations: {
-              full_reset: `MUST reset W, player.hp, player.x, player.targetX, playerBullets, enemyBullets, effects, formation, and AI state`
+              full_reset: `MUST reset W, player.hp, player.x, player.targetX, playerBullets, enemyBullets, effects, formation, and AI state`,
+              restart_raf: `MUST start a new requestAnimationFrame loop after resetting state`
             },
             constraints: {
               clean_slate: `MUST NOT carry over any state from the previous run`
