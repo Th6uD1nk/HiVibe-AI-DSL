@@ -96,6 +96,41 @@ catalog: "path/to/shared-catalog.hvibe"
 | `code` | | `object` | Named code entries: literal code snippets the LLM must use as close reference. LLM-direct. |
 | `tests` | | `object` | Named tests the LLM must verify before finalizing code. See below. |
 
+#### STRICT MODE
+If a catalog entry starts with:
+
+```txt
+STRICT
+```
+
+then it becomes a **deterministic execution contract**.
+
+When STRICT is present:
+* The instruction MUST be implemented exactly as written
+* No reinterpretation is allowed
+* No abstraction or simplification is allowed
+* No architectural refactor is allowed
+* It must be treated as pseudo-executable specification
+* Any deviation = implementation error
+
+Example:
+
+```js
+logic: {
+  physics_step: `
+    STRICT ALGORITHM:
+
+    1. Apply gravity to vertical acceleration (ay += GRAVITY)
+    2. Update velocity using acceleration (vx += ax, vy += ay)
+    3. Update position using velocity (x += vx, y += vy)
+
+    RULE:
+    - Gravity is applied before velocity update
+    - Execution order must never be changed
+  `
+}
+```
+
 #### `catalog.globals`
 
 An optional backtick field that declares constants and variables shared across all features. The LLM must read this field first and use the declared values as-is throughout the generated code. Values must not be redeclared.
