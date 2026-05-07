@@ -18,7 +18,7 @@ HiVibe addresses this by providing a structured and modular format that keeps pr
 
 ## Current Specification Version
 
-The current version is **v0.2.1**.
+The current version is **v0.2.1**. Starter prompt and examples are provided.
 
 Please see:  
 [Specification (v0.2.1)](versions/v0.2.1/spec.md)
