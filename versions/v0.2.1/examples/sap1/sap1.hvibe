@@ -1,0 +1,269 @@
+{
+  hvibe_version: "0.2.1",
+  app: "sap1-cpu",
+  description: `a minimalist SAP-1 (Simple-As-Possible 1) 8-bit CPU emulator running in WebAssembly with interactive clock controls, register inspection, and fake LED visual feedback for the output word`,
+  stack: [`webassembly`, `javascript`, `html`, `css`],
+
+  catalog: {
+    globals: `
+      const RAM_SIZE = 16
+      const WORD_MASK = 0xFF
+      const NIBBLE_MASK = 0x0F
+      const OPCODE_NOP = 0x0
+      const OPCODE_LDA = 0x1
+      const OPCODE_ADD = 0x2
+      const OPCODE_SUB = 0x3
+      const OPCODE_OUT = 0xE
+      const OPCODE_HLT = 0xF
+      const OPCODE_JMP = 0x4
+      const OPCODE_JC  = 0x7
+      const OPCODE_JZ  = 0x8
+    `,
+    logic: {
+      fetch_decode: `
+        Fetch cycle:
+        1. MAR receives value of PC
+        2. PC increments by 1 modulo 16
+        3. RAM at address MAR is loaded into IR
+        Decode:
+        Opcode is upper 4 bits of IR (IR >> 4), operand is lower 4 bits of IR (IR & 0x0F).
+      `,
+      execute_instruction: `
+        STRICT ALGORITHM:
+        1. LDA operand: ACC = RAM[operand]
+        2. ADD operand: B = RAM[operand]; sum = ACC + B; Carry = (sum > 0xFF); ACC = sum & 0xFF; Zero = (ACC == 0)
+        3. SUB operand: B = RAM[operand]; diff = ACC - B; Carry = (diff >= 0); ACC = diff & 0xFF; Zero = (ACC == 0)
+        4. OUT: OUT_REG = ACC
+        5. JMP operand: PC = operand & 0x0F
+        6. JC operand: if Carry flag is set, PC = operand & 0x0F
+        7. JZ operand: if Zero flag is set, PC = operand & 0x0F
+        8. HLT: HALTED = 1
+        9. NOP: do nothing
+      `,
+      wasm_module: `
+        WebAssembly module in binary or WAT containing:
+        - Linear memory of 1 page (64KB) storing RAM (bytes 0x00-0x0F) and registers state:
+          [0x10: PC, 0x11: MAR, 0x12: ACC, 0x13: B, 0x14: IR, 0x15: OUT, 0x16: FLAGS, 0x17: HALTED, 0x18: STEP_COUNT]
+        - Exported function 'init(preset_id)' to load preset bytecode into RAM and reset registers
+        - Exported function 'step()' advancing the CPU by one instruction cycle
+        - Exported function 'reset()' resetting registers to zero and clearing halt
+        - Exported function 'get_out()' returning the 32-bit integer formatted word
+        - Exported function 'get_state(offset)' returning byte at given register/RAM offset
+      `,
+      led_rendering: `
+        Render 8 main LEDs for the OUT register (bit 7 down to bit 0) plus secondary LED banks for PC (4 bits) and Flags (Zero, Carry).
+        Active bit 1 renders as glowing illuminated LED (class 'led on'), inactive bit 0 renders as dark LED (class 'led off').
+        A companion readout displays the 32-bit integer word representation (hex 0x000000XX and unsigned decimal).
+      `
+    },
+    tests: {
+      resetState:      `GIVEN CPU reset is triggered, PC MUST BE 0, ACC MUST BE 0, OUT MUST BE 0, and HALTED MUST BE 0`,
+      ldaInstruction:  `GIVEN memory address 0x9 contains 0x42, after LDA 0x9, ACC MUST BE exactly 0x42`,
+      addInstruction:  `GIVEN ACC is 10 and memory at 0x9 is 15, after ADD 0x9, ACC MUST BE 25 and Zero flag MUST BE 0`,
+      subInstruction:  `GIVEN ACC is 20 and memory at 0x9 is 20, after SUB 0x9, ACC MUST BE 0 and Zero flag MUST BE 1`,
+      outInstruction:  `GIVEN ACC holds 0xAA, after OUT instruction, OUT register MUST BE 0xAA and LED display MUST ALWAYS reflect binary 10101010`,
+      hltInstruction:  `GIVEN HLT instruction executed, HALTED state MUST BE 1 and subsequent clock ticks MUST NOT increment PC or change registers`,
+      wasmEngine:      `the CPU execution loop MUST ALWAYS execute inside WebAssembly and interact with JavaScript through WebAssembly memory and exported functions`,
+      outputFormat:    `the final deliverable MUST ALWAYS be a single self-contained HTML file running in any modern browser without external CDN or dependencies`
+    }
+  },
+
+  units: {
+    output: {
+      name: "Output Deliverable",
+      features: {
+        bundle: {
+          description: `a single self-contained HTML file containing inline CSS, JavaScript, and embedded WebAssembly CPU engine`,
+          inputs: [`code generation`],
+          rules: {
+            obligations: {
+              self_contained: `MUST ALWAYS bundle all styling, markup, logic, and WebAssembly in a single standalone HTML document with zero external network requests`
+            }
+          },
+          tests: ["catalog.tests.outputFormat"]
+        }
+      }
+    },
+
+    core: {
+      name: "CPU Core",
+      description: `the fundamental hardware blocks of the SAP-1 architecture: registers, memory, ALU, and control unit`,
+      features: {
+        registers: {
+          description: `dedicated hardware registers holding execution state`,
+          inputs: [`clock tick`, `system reset`],
+          rules: {
+            obligations: {
+              pc:  `PC MUST BE a 4-bit counter addressing 0 to 15, wrapping to 0 on overflow`,
+              mar: `MAR MUST BE a 4-bit latch holding the RAM memory address during memory accesses`,
+              acc: `ACC MUST BE an 8-bit primary accumulator register holding arithmetic operands and results`,
+              b:   `B MUST BE an 8-bit auxiliary register holding the second operand for ALU calculations`,
+              ir:  `IR MUST BE an 8-bit register holding the current opcode in upper 4 bits and address/data in lower 4 bits`,
+              out: `OUT MUST BE an 8-bit output latch holding the last value emitted by the OUT instruction`
+            },
+            constraints: {
+              reset: `on reset, all registers PC, MAR, ACC, B, IR, OUT MUST BE cleared to zero`
+            }
+          },
+          tests: ["catalog.tests.resetState"]
+        },
+
+        memory: {
+          description: `16 bytes of random access memory storing both instructions and immediate data`,
+          inputs: [`read from MAR`, `write from editor`],
+          rules: {
+            obligations: {
+              size:       `RAM MUST BE exactly 16 bytes (addresses 0x0 to 0xF)`,
+              addressing: `only the 4 least significant bits of the address MUST BE used to access memory`
+            }
+          }
+        },
+
+        alu: {
+          description: `arithmetic logic unit capable of 8-bit binary addition and two's complement subtraction`,
+          inputs: [`triggered by ADD or SUB instruction`],
+          depends_on: [
+            {
+              feature: `registers`,
+              when: [`ACC and B registers contain valid 8-bit operands`]
+            }
+          ],
+          rules: {
+            obligations: {
+              add:        `ADD MUST add ACC and B, store result modulo 256 in ACC, set Carry if sum > 255, and set Zero if result is 0`,
+              sub:        `SUB MUST subtract B from ACC, store result modulo 256 in ACC, set Carry if diff >= 0 (no borrow), and set Zero if result is 0`
+            }
+          },
+          tests: [
+            "catalog.tests.addInstruction",
+            "catalog.tests.subInstruction"
+          ]
+        },
+
+        control_unit: {
+          description: `instruction sequencer decoding opcodes and controlling micro-operations across CPU registers`,
+          inputs: [`clock tick`],
+          depends_on: [
+            {
+              feature: `registers`,
+              when: [`IR holds fetched instruction byte`]
+            },
+            {
+              feature: `alu`,
+              when: [`opcode requires arithmetic operation`]
+            },
+            {
+              feature: `memory`,
+              when: [`fetching instruction or loading/storing data`]
+            }
+          ],
+          rules: {
+            obligations: {
+              sequencer: `MUST implement fetch, decode, and execute cycle for all supported opcodes: NOP, LDA, ADD, SUB, OUT, JMP, JC, JZ, HLT`,
+              halt:      `MUST halt processor when HLT instruction (0xF) is encountered`
+            },
+            constraints: {
+              halt_freeze: `when HALTED is 1, clock ticks MUST NEVER modify registers or increment PC`
+            }
+          },
+          tests: [
+            "catalog.tests.ldaInstruction",
+            "catalog.tests.outInstruction",
+            "catalog.tests.hltInstruction"
+          ],
+          blueprints: [
+            "catalog.logic.fetch_decode",
+            "catalog.logic.execute_instruction"
+          ]
+        }
+      }
+    },
+
+    wasm_layer: {
+      name: "WebAssembly Engine",
+      description: `the execution runtime compiled into or dynamically instantiated via WebAssembly for fast, deterministic hardware simulation`,
+      features: {
+        wasm_runtime: {
+          description: `WebAssembly core module encapsulating CPU state, memory, and single-step execution`,
+          inputs: [`javascript host call step()`, `javascript host call reset()`],
+          depends_on: [
+            {
+              feature: `control_unit`,
+              when: [`emulating CPU cycle`]
+            }
+          ],
+          rules: {
+            obligations: {
+              wasm_execution: `CPU state transition logic MUST ALWAYS be executed inside WebAssembly bytecode`,
+              memory_bridge:  `WebAssembly linear memory MUST expose RAM at fixed offset 0x00 and registers at 0x10 for direct zero-copy inspection by JavaScript`
+            }
+          },
+          tests: ["catalog.tests.wasmEngine"],
+          blueprints: ["catalog.logic.wasm_module"]
+        }
+      }
+    },
+
+    interface: {
+      name: "Interactive Hardware Panel",
+      description: `interactive visualization featuring fake LEDs, register dashboards, RAM viewer/editor, and clock controls`,
+      features: {
+        fake_leds: {
+          description: `a visual bank of illuminated LED components displaying the output word in binary and 32-bit integer formats`,
+          inputs: [`OUT register update`],
+          depends_on: [
+            {
+              feature: `wasm_runtime`,
+              when: [`OUT register or state changes after step()`]
+            }
+          ],
+          rules: {
+            obligations: {
+              led_render: `MUST render an 8-LED bar for OUT register with realistic glow effect when bit is 1, and dark appearance when bit is 0`,
+              word_feedback: `MUST display the output as a 32-bit formatted value (Hexadecimal: 0x000000XX, Binary: 8/32-bit grouped bits, and Decimal integer)`
+            }
+          },
+          tests: ["catalog.tests.ledFeedback"],
+          blueprints: ["catalog.logic.led_rendering"]
+        },
+
+        panel_controls: {
+          description: `controls for stepping single instructions, running continuously with adjustable frequency, resetting CPU, and loading demo programs`,
+          inputs: [`user click on Step`, `user click on Run/Pause`, `user click on Reset`, `user selects preset`],
+          depends_on: [
+            {
+              feature: `wasm_runtime`,
+              when: [`user triggers execution or state mutation`]
+            }
+          ],
+          rules: {
+            obligations: {
+              step:    `clicking Step MUST execute exactly one instruction cycle and refresh all LEDs and registers`,
+              run:     `clicking Run MUST start an automated interval timer executing steps until HLT or Pause is clicked`,
+              speed:   `MUST allow adjusting execution speed from 1 Hz up to 60 Hz`,
+              presets: `MUST provide pre-loaded demo programs: 1. Counter (counts up to 255), 2. Fibonacci sequence, 3. Addition test`
+            }
+          }
+        },
+
+        inspector: {
+          description: `detailed live view of internal registers (PC, MAR, ACC, B, IR, FLAGS) and editable 16-byte RAM table with disassembly`,
+          inputs: [`CPU state update`, `user edits memory byte`],
+          depends_on: [
+            {
+              feature: `wasm_runtime`,
+              when: [`reading CPU state or writing to RAM`]
+            }
+          ],
+          rules: {
+            obligations: {
+              registers_view: `MUST display live values of PC, MAR, ACC, B, IR, Flags (Zero, Carry) and Halted status in both binary and hex`,
+              ram_view:       `MUST display all 16 RAM memory addresses with both hex byte and decoded mnemonic (e.g. 'LDA 14', 'ADD 15')`,
+              highlight_pc:   `MUST visually highlight the memory row currently pointed to by PC`
+            }
+          }
+        }
+      }
+    }
+  }
+}

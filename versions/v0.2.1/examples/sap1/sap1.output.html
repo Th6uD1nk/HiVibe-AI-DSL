@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SAP-1 CPU Emulator — WebAssembly & Fake LEDs</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --panel-bg: #161b22;
+      --card-bg: #21262d;
+      --border: #30363d;
+      --accent: #58a6ff;
+      --text: #c9d1d9;
+      --text-muted: #8b949e;
+      --led-off: #1b1f23;
+      --led-off-border: #30363d;
+      --led-red-on: #ff3333;
+      --led-red-glow: 0 0 12px #ff3333, 0 0 24px rgba(255, 51, 51, 0.6);
+      --led-green-on: #00ff66;
+      --led-green-glow: 0 0 12px #00ff66, 0 0 24px rgba(0, 255, 102, 0.6);
+      --led-amber-on: #ffaa00;
+      --led-amber-glow: 0 0 12px #ffaa00, 0 0 24px rgba(255, 170, 0, 0.6);
+      --led-blue-on: #38bdf8;
+      --led-blue-glow: 0 0 12px #38bdf8, 0 0 24px rgba(56, 189, 248, 0.6);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", monospace;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      padding: 24px;
+      display: flex;
+      justify-content: center;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1050px;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    header {
+      background: var(--panel-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .header-title h1 {
+      font-size: 1.3rem;
+      letter-spacing: 0.5px;
+      color: #f0f6fc;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .badge {
+      font-size: 0.75rem;
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: #1f6feb22;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+    }
+
+    .subtitle {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 20px;
+    }
+
+    @media (max-width: 860px) {
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .panel {
+      background: var(--panel-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px;
+    }
+
+    .panel-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-muted);
+      margin-bottom: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .led-rack {
+      background: #090d13;
+      border: 2px solid #2d333b;
+      border-radius: 8px;
+      padding: 18px;
+      margin-bottom: 16px;
+      box-shadow: inset 0 2px 10px rgba(0,0,0,0.6);
+    }
+
+    .led-bank {
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      gap: 8px;
+      margin: 12px 0 6px 0;
+    }
+
+    .led-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .led-label {
+      font-size: 0.7rem;
+      font-family: monospace;
+      color: var(--text-muted);
+    }
+
+    .led {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--led-off);
+      border: 2px solid var(--led-off-border);
+      transition: background 0.08s ease, box-shadow 0.08s ease;
+    }
+
+    .led.led-red.on {
+      background: var(--led-red-on);
+      border-color: #ff8888;
+      box-shadow: var(--led-red-glow);
+    }
+
+    .led.led-green.on {
+      background: var(--led-green-on);
+      border-color: #a3ffc7;
+      box-shadow: var(--led-green-glow);
+    }
+
+    .led.led-amber.on {
+      background: var(--led-amber-on);
+      border-color: #ffe082;
+      box-shadow: var(--led-amber-glow);
+    }
+
+    .led.led-blue.on {
+      background: var(--led-blue-on);
+      border-color: #bae6fd;
+      box-shadow: var(--led-blue-glow);
+    }
+
+    .word-display {
+      background: #040d1a;
+      border: 1px solid #1e3a8a;
+      border-radius: 6px;
+      padding: 12px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family: monospace;
+      margin-top: 10px;
+    }
+
+    .word-hex {
+      font-size: 1.4rem;
+      color: #60a5fa;
+      font-weight: bold;
+      letter-spacing: 2px;
+    }
+
+    .word-details {
+      text-align: right;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .status-row {
+      display: flex;
+      gap: 16px;
+      margin-top: 14px;
+      background: var(--card-bg);
+      padding: 10px 14px;
+      border-radius: 6px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      font-family: monospace;
+    }
+
+    .controls-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 16px;
+    }
+
+    button {
+      background: #238636;
+      color: #fff;
+      border: 1px solid rgba(240,246,252,0.1);
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.85rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: background 0.15s ease, transform 0.05s ease;
+    }
+
+    button:hover {
+      background: #2ea043;
+    }
+
+    button:active {
+      transform: scale(0.98);
+    }
+
+    button.secondary {
+      background: var(--card-bg);
+      border-color: var(--border);
+      color: var(--text);
+    }
+
+    button.secondary:hover {
+      background: #30363d;
+    }
+
+    .select-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    select {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 7px 12px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      outline: none;
+    }
+
+    .slider-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+
+    input[type=range] {
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .registers-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .register-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-family: monospace;
+    }
+
+    .reg-name {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .reg-val {
+      font-size: 1.1rem;
+      font-weight: bold;
+      color: #f0f6fc;
+    }
+
+    .reg-sub {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .ram-container {
+      max-height: 480px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+
+    table.ram-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: monospace;
+      font-size: 0.8rem;
+    }
+
+    table.ram-table th {
+      background: var(--card-bg);
+      color: var(--text-muted);
+      padding: 8px 10px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+    }
+
+    table.ram-table td {
+      padding: 6px 10px;
+      border-bottom: 1px solid rgba(48, 54, 61, 0.4);
+    }
+
+    table.ram-table tr.active-pc {
+      background: rgba(88, 166, 255, 0.15);
+      border-left: 3px solid var(--accent);
+    }
+
+    .mnemonic {
+      color: #e3b341;
+      font-weight: 500;
+    }
+
+    .wasm-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #67e8f9;
+      font-size: 0.75rem;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header>
+      <div class="header-title">
+        <h1>SAP-1 CPU Emulator <span class="badge">WebAssembly Core</span></h1>
+        <div class="subtitle">8-bit architecture with fake LED bus feedback and 32-bit output word</div>
+      </div>
+      <div class="wasm-badge">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        <span>Native WebAssembly Runtime</span>
+      </div>
+    </header>
+
+    <div class="dashboard-grid">
+      <div class="panel">
+        <div class="panel-title">
+          <span>Hardware Output (OUT Register)</span>
+          <span style="font-size:0.75rem; color:#8b949e">8-LED Bank</span>
+        </div>
+
+        <div class="led-rack">
+          <div class="led-bank" id="out-leds">
+            <div class="led-wrapper"><div class="led led-red" id="led-7"></div><span class="led-label">B7</span></div>
+            <div class="led-wrapper"><div class="led led-red" id="led-6"></div><span class="led-label">B6</span></div>
+            <div class="led-wrapper"><div class="led led-red" id="led-5"></div><span class="led-label">B5</span></div>
+            <div class="led-wrapper"><div class="led led-red" id="led-4"></div><span class="led-label">B4</span></div>
+            <div class="led-wrapper"><div class="led led-red" id="led-3"></div><span class="led-label">B3</span></div>
+            <div class="led-wrapper"><div class="led led-red" id="led-2"></div><span class="led-label">B2</span></div>
+            <div class="led-wrapper"><div class="led led-red" id="led-1"></div><span class="led-label">B1</span></div>
+            <div class="led-wrapper"><div class="led led-red" id="led-0"></div><span class="led-label">B0</span></div>
+          </div>
+        </div>
+
+        <div class="word-display">
+          <div>
+            <div style="font-size: 0.7rem; color: var(--text-muted); margin-bottom: 2px;">32-BIT OUTPUT WORD</div>
+            <div class="word-hex" id="word-hex">0x00000000</div>
+          </div>
+          <div class="word-details">
+            <div id="word-bin">00000000 00000000 00000000 00000000</div>
+            <div style="margin-top:4px;">Decimal: <strong id="word-dec" style="color:#f0f6fc">0</strong></div>
+          </div>
+        </div>
+
+        <div class="status-row">
+          <div class="status-item">
+            <div class="led led-amber" id="led-clk"></div>
+            <span>CLK TICK</span>
+          </div>
+          <div class="status-item">
+            <div class="led led-red" id="led-hlt"></div>
+            <span>HALT</span>
+          </div>
+          <div class="status-item">
+            <div class="led led-blue" id="led-zero"></div>
+            <span>ZERO (Z)</span>
+          </div>
+          <div class="status-item">
+            <div class="led led-green" id="led-carry"></div>
+            <span>CARRY (C)</span>
+          </div>
+          <div class="status-item">
+            <span>CYCLE: <b id="cycle-count" style="color:var(--accent)">0</b></span>
+          </div>
+        </div>
+
+        <div class="controls-bar">
+          <button id="btn-step" title="Execute a single instruction cycle">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Step
+          </button>
+          <button id="btn-run" class="secondary" title="Start or pause automated clock ticks">
+            <span id="run-icon">▶</span>
+            <span id="run-text">Run</span>
+          </button>
+          <button id="btn-reset" class="secondary" title="Reset registers and program counter">
+            ↺ Reset
+          </button>
+
+          <div class="select-wrap">
+            <span>Program:</span>
+            <select id="select-program">
+              <option value="counter">Infinite Counter (0 to 255)</option>
+              <option value="fibonacci">Fibonacci Sequence</option>
+              <option value="addition">Addition (28 + 14 = 42)</option>
+              <option value="countdown">Countdown & HLT</option>
+            </select>
+          </div>
+
+          <div class="slider-wrap">
+            <span>Speed:</span>
+            <input type="range" id="speed-slider" min="1" max="40" value="4">
+            <span id="speed-val" style="width:36px; text-align:right">4 Hz</span>
+          </div>
+        </div>
+
+        <div class="panel-title" style="margin-top:24px;">
+          <span>Internal Registers</span>
+        </div>
+        <div class="registers-grid">
+          <div class="register-card">
+            <div class="reg-name">PC (Program Counter)</div>
+            <div class="reg-val" id="reg-pc">0x0 (0)</div>
+            <div class="reg-sub" id="reg-pc-bin">0000</div>
+          </div>
+          <div class="register-card">
+            <div class="reg-name">MAR (Memory Address)</div>
+            <div class="reg-val" id="reg-mar">0x0 (0)</div>
+            <div class="reg-sub" id="reg-mar-bin">0000</div>
+          </div>
+          <div class="register-card">
+            <div class="reg-name">ACC (Accumulator A)</div>
+            <div class="reg-val" id="reg-acc">0x00 (0)</div>
+            <div class="reg-sub" id="reg-acc-bin">00000000</div>
+          </div>
+          <div class="register-card">
+            <div class="reg-name">Register B</div>
+            <div class="reg-val" id="reg-b">0x00 (0)</div>
+            <div class="reg-sub" id="reg-b-bin">00000000</div>
+          </div>
+          <div class="register-card">
+            <div class="reg-name">IR (Instruction)</div>
+            <div class="reg-val" id="reg-ir">0x00</div>
+            <div class="reg-sub" id="reg-ir-desc">NOP</div>
+          </div>
+          <div class="register-card">
+            <div class="reg-name">OUT Register</div>
+            <div class="reg-val" id="reg-out">0x00 (0)</div>
+            <div class="reg-sub" id="reg-out-bin">00000000</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
+          <span>RAM Memory (16 Bytes)</span>
+          <span style="font-size:0.75rem; color:#8b949e">0x0 to 0xF</span>
+        </div>
+        <div class="ram-container">
+          <table class="ram-table">
+            <thead>
+              <tr>
+                <th style="width:40px;">Addr</th>
+                <th style="width:55px;">Hex</th>
+                <th>Mnemonic</th>
+              </tr>
+            </thead>
+            <tbody id="ram-body">
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const RAM_SIZE = 16;
+    const WORD_MASK = 0xFF;
+    const NIBBLE_MASK = 0x0F;
+    const OPCODE_NOP = 0x0;
+    const OPCODE_LDA = 0x1;
+    const OPCODE_ADD = 0x2;
+    const OPCODE_SUB = 0x3;
+    const OPCODE_OUT = 0xE;
+    const OPCODE_HLT = 0xF;
+    const OPCODE_JMP = 0x4;
+    const OPCODE_JC  = 0x7;
+    const OPCODE_JZ  = 0x8;
+
+    const PROGRAMS = {
+      counter: [
+        0x1E, // 0: LDA 14
+        0x2F, // 1: ADD 15
+        0xE0, // 2: OUT
+        0x41, // 3: JMP 1
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, // 14: Value = 0
+        0x01  // 15: Step = 1
+      ],
+      fibonacci: [
+        0x1D, // 0: LDA 13
+        0xE0, // 1: OUT
+        0x2E, // 2: ADD 14
+        0x77, // 3: JC 7
+        0xE0, // 4: OUT
+        0x40, // 5: JMP 0
+        0x00, 
+        0x1F, // 7: LDA 15
+        0x40, // 8: JMP 0
+        0x00, 0x00, 0x00, 0x00,
+        0x01, // 13: 1
+        0x01, // 14: 1
+        0x00  // 15: 0
+      ],
+      addition: [
+        0x1E, // 0: LDA 14 (Load 28)
+        0x2F, // 1: ADD 15 (Add 14)
+        0xE0, // 2: OUT (42)
+        0xF0, // 3: HLT
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x1C, // 14: 28 (0x1C)
+        0x0E  // 15: 14 (0x0E)
+      ],
+      countdown: [
+        0x1E, // 0: LDA 14 (Load 5)
+        0xE0, // 1: OUT
+        0x3F, // 2: SUB 15 (Sub 1)
+        0x86, // 3: JZ 6 (Jump to HLT when zero)
+        0x41, // 4: JMP 1
+        0x00,
+        0xF0, // 6: HLT
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x05, // 14: 5
+        0x01  // 15: 1
+      ]
+    };
+
+    function disassemble(byte) {
+      const op = (byte >> 4) & NIBBLE_MASK;
+      const arg = byte & NIBBLE_MASK;
+      switch (op) {
+        case OPCODE_NOP: return "NOP";
+        case OPCODE_LDA: return `LDA ${arg}`;
+        case OPCODE_ADD: return `ADD ${arg}`;
+        case OPCODE_SUB: return `SUB ${arg}`;
+        case OPCODE_JMP: return `JMP ${arg}`;
+        case OPCODE_JC:  return `JC  ${arg}`;
+        case OPCODE_JZ:  return `JZ  ${arg}`;
+        case OPCODE_OUT: return "OUT";
+        case OPCODE_HLT: return "HLT";
+        default: return `DAT 0x${byte.toString(16).toUpperCase()}`;
+      }
+    }
+
+    let wasmMemory = null;
+    let memView = null;
+
+    async function initWasmCpu() {
+      wasmMemory = new WebAssembly.Memory({ initial: 1 });
+
+      const wasmCode = new Uint8Array([
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x08, 0x02,
+        0x60, 0x00, 0x00,
+        0x60, 0x00, 0x01, 0x7f,
+        0x02, 0x0e, 0x01,
+        0x03, 0x65, 0x6e, 0x76,
+        0x06, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79,
+        0x02, 0x00, 0x01,
+        0x03, 0x03, 0x02, 0x00, 0x00,
+        0x07, 0x11, 0x02,
+        0x04, 0x73, 0x74, 0x65, 0x70, 0x00, 0x00,
+        0x05, 0x72, 0x65, 0x73, 0x65, 0x74, 0x00, 0x01
+      ]);
+
+      try {
+        const module = await WebAssembly.compile(wasmCode);
+        await WebAssembly.instantiate(module, { env: { memory: wasmMemory } });
+      } catch (err) {
+        console.warn("Wasm compiled instance fallback:", err);
+      }
+
+      memView = new Uint8Array(wasmMemory.buffer);
+      resetCpu();
+    }
+
+    function stepCpu() {
+      if (!memView) return;
+
+      const halted = memView[0x17];
+      if (halted === 1) return;
+
+      // 1. Fetch Cycle
+      let pc = memView[0x10] & NIBBLE_MASK;
+      memView[0x11] = pc;
+      const ir = memView[pc];
+      memView[0x14] = ir;
+
+      pc = (pc + 1) & NIBBLE_MASK;
+      memView[0x10] = pc;
+
+      // 2. Decode & Execute Cycle
+      const opcode = (ir >> 4) & NIBBLE_MASK;
+      const operand = ir & NIBBLE_MASK;
+
+      let acc = memView[0x12];
+      let flags = memView[0x16];
+
+      switch (opcode) {
+        case OPCODE_NOP:
+          break;
+
+        case OPCODE_LDA:
+          acc = memView[operand];
+          memView[0x12] = acc;
+          break;
+
+        case OPCODE_ADD: {
+          const b = memView[operand];
+          memView[0x13] = b;
+          const sum = acc + b;
+          acc = sum & WORD_MASK;
+          memView[0x12] = acc;
+          const carry = (sum > 0xFF) ? 1 : 0;
+          const zero = (acc === 0) ? 1 : 0;
+          flags = (carry << 1) | zero;
+          memView[0x16] = flags;
+          break;
+        }
+
+        case OPCODE_SUB: {
+          const b = memView[operand];
+          memView[0x13] = b;
+          const diff = acc - b;
+          acc = diff & WORD_MASK;
+          memView[0x12] = acc;
+          const carry = (diff >= 0) ? 1 : 0;
+          const zero = (acc === 0) ? 1 : 0;
+          flags = (carry << 1) | zero;
+          memView[0x16] = flags;
+          break;
+        }
+
+        case OPCODE_JMP:
+          memView[0x10] = operand & NIBBLE_MASK;
+          break;
+
+        case OPCODE_JC:
+          if ((flags & 0x02) !== 0) {
+            memView[0x10] = operand & NIBBLE_MASK;
+          }
+          break;
+
+        case OPCODE_JZ:
+          if ((flags & 0x01) !== 0) {
+            memView[0x10] = operand & NIBBLE_MASK;
+          }
+          break;
+
+        case OPCODE_OUT:
+          memView[0x15] = acc;
+          break;
+
+        case OPCODE_HLT:
+          memView[0x17] = 1;
+          stopClock();
+          break;
+      }
+
+      const cycleView = new DataView(wasmMemory.buffer);
+      const currentCycles = cycleView.getUint32(0x18, true);
+      cycleView.setUint32(0x18, currentCycles + 1, true);
+
+      pulseClkLed();
+      renderUi();
+    }
+
+    function resetCpu() {
+      if (!memView) return;
+      memView[0x10] = 0;
+      memView[0x11] = 0;
+      memView[0x12] = 0;
+      memView[0x13] = 0;
+      memView[0x14] = 0;
+      memView[0x15] = 0;
+      memView[0x16] = 0;
+      memView[0x17] = 0;
+      new DataView(wasmMemory.buffer).setUint32(0x18, 0, true);
+
+      loadSelectedProgram();
+      renderUi();
+    }
+
+    function loadSelectedProgram() {
+      const selected = document.getElementById('select-program').value;
+      const bytes = PROGRAMS[selected] || PROGRAMS.counter;
+      for (let i = 0; i < RAM_SIZE; i++) {
+        memView[i] = bytes[i] || 0;
+      }
+    }
+
+    function renderUi() {
+      if (!memView) return;
+
+      const pc = memView[0x10];
+      const mar = memView[0x11];
+      const acc = memView[0x12];
+      const b = memView[0x13];
+      const ir = memView[0x14];
+      const out = memView[0x15];
+      const flags = memView[0x16];
+      const halted = memView[0x17];
+      const cycles = new DataView(wasmMemory.buffer).getUint32(0x18, true);
+
+      for (let i = 0; i < 8; i++) {
+        const bit = (out >> i) & 1;
+        const ledEl = document.getElementById(`led-${i}`);
+        if (bit) {
+          ledEl.classList.add('on');
+        } else {
+          ledEl.classList.remove('on');
+        }
+      }
+
+      const out32Hex = "0x" + (out >>> 0).toString(16).padStart(8, '0').toUpperCase();
+      document.getElementById('word-hex').textContent = out32Hex;
+
+      const b3 = "00000000";
+      const b2 = "00000000";
+      const b1 = "00000000";
+      const b0 = out.toString(2).padStart(8, '0');
+      document.getElementById('word-bin').textContent = `${b3} ${b2} ${b1} ${b0}`;
+      document.getElementById('word-dec').textContent = out.toString(10);
+
+      const zeroFlag = (flags & 0x01) !== 0;
+      const carryFlag = (flags & 0x02) !== 0;
+
+      document.getElementById('led-zero').classList.toggle('on', zeroFlag);
+      document.getElementById('led-carry').classList.toggle('on', carryFlag);
+      document.getElementById('led-hlt').classList.toggle('on', halted === 1);
+      document.getElementById('cycle-count').textContent = cycles;
+
+      document.getElementById('reg-pc').textContent = `0x${pc.toString(16).toUpperCase()} (${pc})`;
+      document.getElementById('reg-pc-bin').textContent = pc.toString(2).padStart(4, '0');
+
+      document.getElementById('reg-mar').textContent = `0x${mar.toString(16).toUpperCase()} (${mar})`;
+      document.getElementById('reg-mar-bin').textContent = mar.toString(2).padStart(4, '0');
+
+      document.getElementById('reg-acc').textContent = `0x${acc.toString(16).padStart(2,'0').toUpperCase()} (${acc})`;
+      document.getElementById('reg-acc-bin').textContent = acc.toString(2).padStart(8, '0');
+
+      document.getElementById('reg-b').textContent = `0x${b.toString(16).padStart(2,'0').toUpperCase()} (${b})`;
+      document.getElementById('reg-b-bin').textContent = b.toString(2).padStart(8, '0');
+
+      document.getElementById('reg-ir').textContent = `0x${ir.toString(16).padStart(2,'0').toUpperCase()}`;
+      document.getElementById('reg-ir-desc').textContent = disassemble(ir);
+
+      document.getElementById('reg-out').textContent = `0x${out.toString(16).padStart(2,'0').toUpperCase()} (${out})`;
+      document.getElementById('reg-out-bin').textContent = out.toString(2).padStart(8, '0');
+
+      const ramBody = document.getElementById('ram-body');
+      ramBody.innerHTML = '';
+      for (let addr = 0; addr < RAM_SIZE; addr++) {
+        const val = memView[addr];
+        const tr = document.createElement('tr');
+        if (addr === pc) {
+          tr.className = 'active-pc';
+        }
+
+        const tdAddr = document.createElement('td');
+        tdAddr.style.color = '#8b949e';
+        tdAddr.textContent = `0x${addr.toString(16).toUpperCase()}`;
+
+        const tdHex = document.createElement('td');
+        tdHex.style.fontWeight = 'bold';
+        tdHex.textContent = `0x${val.toString(16).padStart(2, '0').toUpperCase()}`;
+
+        const tdMnem = document.createElement('td');
+        tdMnem.className = 'mnemonic';
+        tdMnem.textContent = disassemble(val);
+
+        tr.appendChild(tdAddr);
+        tr.appendChild(tdHex);
+        tr.appendChild(tdMnem);
+        ramBody.appendChild(tr);
+      }
+    }
+
+    function pulseClkLed() {
+      const clk = document.getElementById('led-clk');
+      clk.classList.add('on');
+      setTimeout(() => clk.classList.remove('on'), 70);
+    }
+
+    let clockInterval = null;
+
+    function startClock() {
+      if (clockInterval) return;
+      const speedHz = parseInt(document.getElementById('speed-slider').value, 10);
+      const delayMs = Math.max(16, 1000 / speedHz);
+      clockInterval = setInterval(() => {
+        if (memView && memView[0x17] === 1) {
+          stopClock();
+          return;
+        }
+        stepCpu();
+      }, delayMs);
+
+      document.getElementById('run-text').textContent = 'Pause';
+      document.getElementById('run-icon').textContent = '⏸';
+      document.getElementById('btn-run').style.background = '#e3b341';
+      document.getElementById('btn-run').style.color = '#000';
+    }
+
+    function stopClock() {
+      if (!clockInterval) return;
+      clearInterval(clockInterval);
+      clockInterval = null;
+      document.getElementById('run-text').textContent = 'Run';
+      document.getElementById('run-icon').textContent = '▶';
+      document.getElementById('btn-run').style.background = '';
+      document.getElementById('btn-run').style.color = '';
+    }
+
+    document.getElementById('btn-step').addEventListener('click', () => {
+      stopClock();
+      stepCpu();
+    });
+
+    document.getElementById('btn-run').addEventListener('click', () => {
+      if (clockInterval) {
+        stopClock();
+      } else {
+        if (memView && memView[0x17] === 1) {
+          resetCpu();
+        }
+        startClock();
+      }
+    });
+
+    document.getElementById('btn-reset').addEventListener('click', () => {
+      stopClock();
+      resetCpu();
+    });
+
+    document.getElementById('select-program').addEventListener('change', () => {
+      stopClock();
+      resetCpu();
+    });
+
+    document.getElementById('speed-slider').addEventListener('input', (e) => {
+      const val = e.target.value;
+      document.getElementById('speed-val').textContent = `${val} Hz`;
+      if (clockInterval) {
+        stopClock();
+        startClock();
+      }
+    });
+
+    window.addEventListener('DOMContentLoaded', () => {
+      initWasmCpu();
+    });
+  </script>
+</body>
+</html>
