@@ -1,0 +1,309 @@
+{
+  hvibe_version: "0.2.1",
+  app: "z80-framebuffer",
+  description: `a true instruction-level Z80 microprocessor emulator with full opcode execution, 64KB memory space, hex bytecode loading capability, and a 480x272 pixel screen bound directly to memory-mapped VRAM`,
+  stack: [`javascript`, `html`, `css`],
+
+  catalog: {
+    globals: `
+      const SCREEN_WIDTH = 480
+      const SCREEN_HEIGHT = 272
+      const BYTES_PER_ROW = 60
+      const VRAM_SIZE = 16320
+      const VRAM_START = 0xC000
+      const VRAM_END = 0xFFBF
+      const TOTAL_RAM = 65536
+
+      const FLAG_CARRY = 0x01
+      const FLAG_SUB = 0x02
+      const FLAG_PARITY_OVERFLOW = 0x04
+      const FLAG_HALF_CARRY = 0x10
+      const FLAG_ZERO = 0x40
+      const FLAG_SIGN = 0x80
+    `,
+
+    code: {
+      square_move: `
+        STRICT
+        // Real Z80 machine code: 16x16 pixel square moving smoothly from left to right across the 480x272 screen
+        // Bytecode sequence:
+        31 00 FF AF 32 80 00 3A 80 00 5F 16 00 21 00 DE 19 06 10 3E FF 77 23 77 11 3B 00 19 10 F7 01 00 18 0B 78 B1 20 FB 3A 80 00 5F 16 00 21 00 DE 19 06 10 AF 77 23 77 11 3B 00 19 10 F7 3A 80 00 3C FE 3A 20 01 AF 32 80 00 C3 07 00
+      `,
+
+      vertical_scanlines: `
+        STRICT
+        // Real Z80 machine code: Full-screen alternating vertical raster scanlines (0xAA / 0x55) using hardware LDIR block copy
+        // Bytecode sequence:
+        31 00 FF 3E AA 32 00 C0 21 00 C0 11 01 C0 01 BF 3F ED B0 01 00 80 0B 78 78 B1 7A 20 F9 2F C3 05 00
+      `,
+
+      blinking_cursor: `
+        STRICT
+        // Real Z80 machine code: Realistic blinking text cursor (8x16 pixels) centered at 0xDE1E with hardware delay loops
+        // Bytecode sequence:
+        31 00 FF 21 1E DE 06 10 3E FF 77 11 3C 00 19 10 F9 01 00 80 0B 78 B1 20 FB 21 1E DE 06 10 AF 77 11 3C 00 19 10 F9 01 00 80 0B 78 B1 20 FB C3 03 00
+      `
+    },
+
+    logic: {
+      instruction_decode_execution: `
+        STRICT ALGORITHM:
+        The CPU executes raw Z80 binary machine code in a continuous Fetch-Decode-Execute cycle:
+        1. Fetch byte at memory[PC] into IR, increment PC (modulo 65536).
+        2. Decode and execute instruction according to standard Z80 opcode matrix:
+           - Unprefixed opcodes (0x00 to 0xFF):
+             * 8-bit loads: LD r, r' | LD r, n | LD r, (HL) | LD (HL), r | LD A, (nn) | LD (nn), A
+             * 16-bit loads: LD rr, nn | LD SP, HL | PUSH rr | POP rr | LD (nn), HL | LD HL, (nn)
+             * Arithmetic/Logic: ADD A, r | ADC A, r | SUB r | SBC A, r | AND r | XOR r | OR r | CP r
+             * Increment/Decrement: INC r | DEC r | INC rr | DEC rr | INC (HL) | DEC (HL)
+             * Jumps & Loops: JP nn | JP cc, nn | JR e | JR cc, e | DJNZ e | CALL nn | CALL cc, nn | RET | RET cc
+             * Exchanges: EX DE, HL | EX AF, AF' | EXX
+             * Miscellaneous: NOP | HALT | DAA | CPL | CCF | SCF
+           - Prefixed opcodes:
+             * 0xCB (Bit manipulation & shifts): RLC, RRC, RL, RR, SLA, SRA, SRL, BIT b, r, RES b, r, SET b, r
+             * 0xED (Extended instructions): LDIR (block copy), LDDR, CPIR, 16-bit ADC/SBC, LD (nn), rr, LD rr, (nn)
+             * 0xDD and 0xFD (Indexed operations): LD r, (IX+d), LD (IX+d), r, ADD IX, rr, INC/DEC IX/IY
+        3. All memory read and write operations pass through the memory bus. Direct writes to addresses 0xC000..0xFFBF immediately mutate the video framebuffer.
+      `,
+      flag_calculations: `
+        ALU operations MUST compute authentic Z80 status flags:
+        - Sign (S): bit 7 of result.
+        - Zero (Z): set to 1 if result is 0, else 0.
+        - Half-Carry (H): carry out of bit 3 in 8-bit addition / borrow in subtraction.
+        - Parity / Overflow (P/V): parity (even number of 1s) for logic ops, two's complement signed overflow for arithmetic.
+        - Add/Subtract (N): 0 for addition, 1 for subtraction/comparisons.
+        - Carry (C): carry out of bit 7 in 8-bit addition / borrow in subtraction.
+      `,
+      hex_bytecode_loader: `
+        STRICT ALGORITHM:
+        Parse a sequence of hexadecimal numbers (separated by spaces, commas, or newlines) representing assembled Z80 machine code.
+        Write the parsed bytes sequentially into memory starting at target address (default 0x0000).
+        Reset all CPU registers (A=0, F=0, B=0, C=0, D=0, E=0, H=0, L=0, SP=0xFF00, PC=0x0000) so the CPU executes the binary program from the entry point.
+      `,
+      framebuffer_blit: `
+        Scanline-by-scanline direct memory blit:
+        VRAM spans 16,320 bytes from address 0xC000 to 0xFFBF.
+        For each of the 272 vertical rows:
+          For each of the 60 bytes in the row:
+            Read byte from memory[0xC000 + row * 60 + col].
+            Map each bit (bit 7 down to bit 0) to corresponding canvas pixel (X = col * 8 + (7 - bit)):
+              bit 1 => illuminated phosphor green (#39ff14) or crisp white (#ffffff).
+              bit 0 => dark background (#0a0f0d).
+        Canvas 2D ImageData buffer is refreshed every animation frame.
+      `
+    },
+    tests: {
+      instructionExecution: `GIVEN machine code bytes [0x3E, 0x42] (LD A, 0x42) at PC 0x0000, after one instruction step, register A MUST BE exactly 0x42 and PC MUST BE 0x0002`,
+      directVramWrite:     `GIVEN machine code bytes [0x21, 0x00, 0xC0, 0x36, 0xFF] (LD HL, 0xC000; LD (HL), 0xFF) executed by the CPU, memory address 0xC000 MUST BE 0xFF and the first 8 pixels on canvas MUST BE illuminated`,
+      loopInstruction:     `GIVEN machine code [0x06, 0x05, 0x10, 0xFE] (LD B, 5; loop: DJNZ loop), the CPU MUST decrement B down to 0 and loop 5 times before continuing`,
+      blockTransferLdir:   `GIVEN instruction LDIR (0xED, 0xB0) with HL=0x0100, DE=0xC000, BC=16, 16 bytes MUST BE copied from source to VRAM destination and BC MUST reach 0`,
+      hexProgramLoading:   `GIVEN a user provides a hex string '21 00 C0 3E FF 77', parser MUST write bytes [0x21, 0x00, 0xC0, 0x3E, 0xFF, 0x77] into memory at 0x0000 and reset PC to 0x0000`,
+      squareMoveLocked:    `the generated code MUST load the exact bytecode sequence defined in catalog.code.square_move for the moving square program`,
+      scanlinesLocked:     `the generated code MUST load the exact bytecode sequence defined in catalog.code.vertical_scanlines for the vertical scanlines program`,
+      blinkingCursorLocked:`the generated code MUST load the exact bytecode sequence defined in catalog.code.blinking_cursor for the blinking cursor program`,
+      canvasDimensions:    `the HTML canvas element MUST BE configured with width exactly 480 and height exactly 272`,
+      vramSpan:            `VRAM MUST span exactly 16320 bytes from 0xC000 to 0xFFBF within the 64KB Z80 memory space`,
+      playPauseToggle:     `GIVEN clicking the Play/Pause button, CPU execution MUST toggle between running and paused states`,
+      standaloneBundle:    `the final output deliverable MUST BE a single self-contained HTML file without external libraries or assets`
+    }
+  },
+
+  units: {
+    output: {
+      name: "Output Deliverable",
+      features: {
+        bundle: {
+          description: `a single self-contained HTML file containing the complete Z80 instruction emulator, memory framebuffer blitter, hex program loader, and canvas interface`,
+          inputs: [`code generation`],
+          rules: {
+            obligations: {
+              self_contained: `MUST ALWAYS bundle all styling, Z80 instruction decoding engine, hex loader, and canvas rendering in a single standalone HTML document with zero external dependencies`
+            }
+          },
+          tests: ["catalog.tests.standaloneBundle"]
+        }
+      }
+    },
+
+    cpu: {
+      name: "Z80 Microprocessor Core",
+      description: `authentic instruction-level Z80 emulation engine decoding and executing real machine code byte streams`,
+      features: {
+        registers: {
+          description: `complete set of Z80 registers including main, alternate, index, stack, and program counters`,
+          inputs: [`CPU reset`, `instruction execution`],
+          rules: {
+            obligations: {
+              main_set:      `MUST implement 8-bit registers A, F, B, C, D, E, H, L accessible individually and as 16-bit pairs AF, BC, DE, HL`,
+              alternate_set: `MUST implement alternate registers A', F', B', C', D', E', H', L' swapped via EX AF, AF' and EXX`,
+              pointers:      `MUST implement 16-bit registers PC (Program Counter), SP (Stack Pointer), IX, and IY`,
+              flags:         `MUST implement all Z80 flags in register F: Sign (S), Zero (Z), Half-Carry (H), Parity/Overflow (P/V), Add/Subtract (N), Carry (C)`
+            },
+            constraints: {
+              reset_pc: `on reset, PC MUST BE initialized to 0x0000 and SP MUST BE initialized to 0xFF00`
+            }
+          }
+        },
+
+        memory_bus: {
+          description: `64 KB addressable memory subsystem handling instruction fetch, data reads, and memory-mapped VRAM writes`,
+          inputs: [`memory read from address`, `memory write to address`],
+          rules: {
+            obligations: {
+              total_size:    `memory space MUST BE exactly 65536 bytes (addresses 0x0000 to 0xFFFF)`,
+              vram_mapping:  `addresses 0xC000 through 0xFFBF (16320 bytes) MUST BE memory-mapped video RAM`,
+              live_write:    `any Z80 store instruction (e.g. LD (HL), A, LD (DE), A, LDIR) writing to addresses >= 0xC000 MUST directly mutate VRAM`
+            }
+          },
+          tests: [
+            "catalog.tests.vramSpan",
+            "catalog.tests.directVramWrite"
+          ]
+        },
+
+        instruction_interpreter: {
+          description: `true instruction decoder executing unprefixed opcodes (0x00-0xFF), CB-prefixed bit instructions, and ED-prefixed block/extended instructions`,
+          inputs: [`CPU step cycle`],
+          depends_on: [
+            {
+              feature: `registers`,
+              when: [`fetching and updating register values`]
+            },
+            {
+              feature: `memory_bus`,
+              when: [`fetching opcodes and accessing operands in memory`]
+            }
+          ],
+          rules: {
+            obligations: {
+              full_opcode_dispatch: `MUST decode and execute real Z80 binary opcodes: 8-bit/16-bit loads, arithmetic and logic (ADD, SUB, AND, OR, XOR, CP, INC, DEC), bit manipulations (CB prefix: BIT, SET, RES, shifts/rotations), block transfer (ED prefix: LDIR, LDDR), and control flow (JP, JR, CALL, RET, DJNZ)`,
+              real_execution:       `MUST execute the actual binary bytecode stored in RAM starting at PC, updating CPU state strictly per instruction semantics without skipping or faking execution`
+            }
+          },
+          tests: [
+            "catalog.tests.instructionExecution",
+            "catalog.tests.loopInstruction",
+            "catalog.tests.blockTransferLdir"
+          ],
+          blueprints: [
+            "catalog.logic.instruction_decode_execution",
+            "catalog.logic.flag_calculations"
+          ]
+        }
+      }
+    },
+
+    loader: {
+      name: "Machine Code Loader",
+      description: `subsystem for loading pre-assembled hex bytecode routines and custom user-provided Z80 machine code`,
+      features: {
+        hex_input: {
+          description: `interactive input allowing the user to paste or enter hexadecimal Z80 machine code to execute directly on the CPU`,
+          inputs: [`user pastes hex string`, `user selects preset demo program`],
+          depends_on: [
+            {
+              feature: `memory_bus`,
+              when: [`writing parsed machine code into RAM starting at 0x0000`]
+            },
+            {
+              feature: `registers`,
+              when: [`resetting PC to 0x0000`]
+            }
+          ],
+          rules: {
+            obligations: {
+              hex_parsing:       `MUST parse whitespace-separated, comma-separated, or contiguous hexadecimal byte strings and write them directly into RAM at 0x0000`,
+              built_in_programs: `MUST supply exactly the three pre-assembled Z80 programs from catalog.code: 1. Moving Square (catalog.code.square_move), 2. Vertical Scanlines (catalog.code.vertical_scanlines), 3. Blinking Cursor (catalog.code.blinking_cursor)`,
+              reload_and_run:    `loading a program MUST clear VRAM, load the machine code at 0x0000, reset PC to 0x0000, and immediately start execution`
+            },
+            constraints: {
+              exact_bytecode: `MUST NEVER replace or approximate the machine code of the three presets with high-level JavaScript shortcuts; the exact byte sequences from catalog.code MUST BE injected into memory`
+            }
+          },
+          tests: [
+            "catalog.tests.hexProgramLoading",
+            "catalog.tests.squareMoveLocked",
+            "catalog.tests.scanlinesLocked",
+            "catalog.tests.blinkingCursorLocked"
+          ],
+          blueprints: [
+            "catalog.code.square_move",
+            "catalog.code.vertical_scanlines",
+            "catalog.code.blinking_cursor",
+            "catalog.logic.hex_bytecode_loader"
+          ]
+        }
+      }
+    },
+
+    display: {
+      name: "Direct Memory Framebuffer",
+      description: `video subsystem continuously reflecting the 16,320-byte VRAM memory segment directly onto a 480x272 canvas`,
+      features: {
+        framebuffer: {
+          description: `direct memory mapping translating 1-bit bitmap data from 0xC000-0xFFBF into 480x272 RGBA canvas pixels`,
+          inputs: [`animation frame tick`],
+          depends_on: [
+            {
+              feature: `memory_bus`,
+              when: [`reading VRAM bytes at 0xC000 - 0xFFBF`]
+            }
+          ],
+          rules: {
+            obligations: {
+              resolution:    `MUST render to a canvas with native resolution of exactly 480 horizontal pixels by 272 vertical pixels`,
+              pixel_mapping: `each scanline of 480 pixels MUST read exactly 60 sequential bytes from VRAM, bit 7 to bit 0 for each byte`,
+              retro_palette: `active bits MUST produce an illuminated phosphor green or white pixel, inactive bits MUST produce dark background`
+            }
+          },
+          tests: [
+            "catalog.tests.canvasDimensions",
+            "catalog.tests.directVramWrite"
+          ],
+          blueprints: ["catalog.logic.framebuffer_blit"]
+        }
+      }
+    },
+
+    interface: {
+      name: "Minimalist Interface",
+      description: `clean retro display frame hosting the 480x272 canvas, playback controls, locked preset selector, and hex code input panel`,
+      features: {
+        screen_viewport: {
+          description: `centered canvas element with crisp nearest-neighbor scaling and subtle retro monitor frame`,
+          inputs: [`DOM render`],
+          rules: {
+            obligations: {
+              canvas_element:  `MUST present an HTML5 canvas element with width 480 and height 272`,
+              pixelated_style: `MUST use image-rendering: pixelated or crisp-edges to preserve sharp retro pixels`
+            }
+          },
+          tests: ["catalog.tests.canvasDimensions"]
+        },
+
+        bottom_controls: {
+          description: `a simple toolbar located beneath the screen with a program selector dropdown, a play/pause button, and a collapsible hex bytecode input modal or field`,
+          inputs: [`user click on Play/Pause`, `user selects program from dropdown`, `user clicks Load Hex`],
+          depends_on: [
+            {
+              feature: `instruction_interpreter`,
+              when: [`toggling execution state`]
+            },
+            {
+              feature: `hex_input`,
+              when: [`submitting custom machine code`]
+            }
+          ],
+          rules: {
+            obligations: {
+              play_pause_button: `MUST provide a single toggle button to play or pause CPU execution`,
+              program_dropdown:  `MUST provide a dropdown selector with exactly three locked options: 1. Moving Square (Left to Right), 2. Vertical Scanlines, 3. Blinking Cursor`,
+              custom_hex_modal:  `MUST provide an input area to paste raw Z80 hexadecimal opcodes, with a 'Load & Run' button that writes them to 0x0000 and starts the CPU`
+            }
+          },
+          tests: ["catalog.tests.playPauseToggle"]
+        }
+      }
+    }
+  }
+}

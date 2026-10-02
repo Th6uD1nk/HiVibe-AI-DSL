@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Z80 Direct Memory Framebuffer (480x272)</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card-bg: #161b22;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --text-muted: #8b949e;
+      --accent: #39ff14;
+      --btn-bg: #21262d;
+      --btn-hover: #30363d;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .monitor-case {
+      background: #11161d;
+      border: 3px solid #282e37;
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      max-width: 530px;
+      width: 100%;
+    }
+
+    .screen-bezel {
+      background: #000;
+      border: 2px solid #21262d;
+      border-radius: 6px;
+      padding: 6px;
+      box-shadow: inset 0 0 16px rgba(0, 0, 0, 0.9);
+      position: relative;
+    }
+
+    canvas#screen {
+      display: block;
+      width: 480px;
+      height: 272px;
+      background: #0a0f0d;
+      image-rendering: -moz-crisp-edges;
+      image-rendering: -webkit-crisp-edges;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+
+    .controls-toolbar {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 4px 2px;
+    }
+
+    .left-controls {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    button {
+      background: #238636;
+      color: #fff;
+      border: 1px solid rgba(240, 246, 252, 0.1);
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.82rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: background 0.15s ease, transform 0.05s ease;
+    }
+
+    button:hover {
+      background: #2ea043;
+    }
+
+    button.secondary {
+      background: var(--card-bg);
+      border-color: var(--border);
+      color: var(--text);
+    }
+
+    button.secondary:hover {
+      background: #30363d;
+    }
+
+    button#btn-play-pause.paused {
+      background: #d29922;
+      color: #0d1117;
+    }
+
+    button#btn-play-pause.paused:hover {
+      background: #e3b341;
+    }
+
+    button:active {
+      transform: scale(0.98);
+    }
+
+    .dropdown-container {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+
+    select#select-program {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      outline: none;
+    }
+
+    .stats-label {
+      font-size: 0.72rem;
+      font-family: monospace;
+      color: var(--text-muted);
+    }
+
+    .hex-modal {
+      width: 100%;
+      background: #090d13;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .hex-modal.active {
+      display: flex;
+    }
+
+    .hex-modal textarea {
+      width: 100%;
+      height: 70px;
+      background: #04080e;
+      border: 1px solid var(--border);
+      color: #7ee787;
+      font-family: monospace;
+      font-size: 0.78rem;
+      padding: 6px;
+      border-radius: 4px;
+      outline: none;
+      resize: vertical;
+    }
+
+    .hex-modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="monitor-case">
+    <div class="screen-bezel">
+      <canvas id="screen" width="480" height="272"></canvas>
+    </div>
+
+    <div class="controls-toolbar">
+      <div class="left-controls">
+        <button id="btn-play-pause">
+          <span id="btn-icon">⏸</span>
+          <span id="btn-text">Pause</span>
+        </button>
+
+        <div class="dropdown-container">
+          <select id="select-program">
+            <option value="square_move">1. Moving Square (Left to Right)</option>
+            <option value="vertical_scanlines">2. Vertical Scanlines</option>
+            <option value="blinking_cursor">3. Blinking Cursor</option>
+          </select>
+        </div>
+
+        <button id="btn-toggle-hex" class="secondary" title="Open Hex Machine Code Input">
+          [Hex Input]
+        </button>
+      </div>
+
+      <div class="stats-label" id="stats-display">
+        PC: 0x0000 | VRAM: 0xC000 - 0xFFBF
+      </div>
+    </div>
+
+    <div class="hex-modal" id="hex-modal">
+      <div style="font-size: 0.75rem; color: var(--text-muted);">
+        Enter Z80 hexadecimal opcodes (e.g. <code>21 00 C0 3E FF 77 23 18 FC</code>):
+      </div>
+      <textarea id="hex-input-text"></textarea>
+      <div class="hex-modal-actions">
+        <button id="btn-load-run">Load & Run at 0x0000</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Constants from catalog.globals
+    const SCREEN_WIDTH = 480;
+    const SCREEN_HEIGHT = 272;
+    const BYTES_PER_ROW = 60;
+    const VRAM_SIZE = 16320;
+    const VRAM_START = 0xC000;
+    const VRAM_END = 0xFFBF;
+    const TOTAL_RAM = 65536;
+
+    const FLAG_CARRY = 0x01;
+    const FLAG_SUB = 0x02;
+    const FLAG_PARITY_OVERFLOW = 0x04;
+    const FLAG_HALF_CARRY = 0x10;
+    const FLAG_ZERO = 0x40;
+    const FLAG_SIGN = 0x80;
+
+    // 64 KB Memory Space
+    const memory = new Uint8Array(TOTAL_RAM);
+
+    // Z80 CPU Architecture State
+    const cpu = {
+      a: 0, f: 0,
+      b: 0, c: 0,
+      d: 0, e: 0,
+      h: 0, l: 0,
+      a_: 0, f_: 0,
+      b_: 0, c_: 0,
+      d_: 0, e_: 0,
+      h_: 0, l_: 0,
+      ix: 0, iy: 0,
+      sp: 0xFF00,
+      pc: 0x0000,
+      halted: false
+    };
+
+    // Parity lookup table
+    const parityTable = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) {
+      let p = 0;
+      for (let b = 0; b < 8; b++) {
+        if ((i >> b) & 1) p++;
+      }
+      parityTable[i] = (p % 2 === 0) ? FLAG_PARITY_OVERFLOW : 0;
+    }
+
+    // 16-bit register getters and setters
+    function getBC() { return (cpu.b << 8) | cpu.c; }
+    function setBC(v) { cpu.b = (v >> 8) & 0xFF; cpu.c = v & 0xFF; }
+
+    function getDE() { return (cpu.d << 8) | cpu.e; }
+    function setDE(v) { cpu.d = (v >> 8) & 0xFF; cpu.e = v & 0xFF; }
+
+    function getHL() { return (cpu.h << 8) | cpu.l; }
+    function setHL(v) { cpu.h = (v >> 8) & 0xFF; cpu.l = v & 0xFF; }
+
+    function getAF() { return (cpu.a << 8) | cpu.f; }
+    function setAF(v) { cpu.a = (v >> 8) & 0xFF; cpu.f = v & 0xFF; }
+
+    // Memory access
+    function memRead(addr) {
+      return memory[addr & 0xFFFF];
+    }
+
+    function memWrite(addr, val) {
+      memory[addr & 0xFFFF] = val & 0xFF;
+    }
+
+    function memRead16(addr) {
+      const lo = memory[addr & 0xFFFF];
+      const hi = memory[(addr + 1) & 0xFFFF];
+      return (hi << 8) | lo;
+    }
+
+    function memWrite16(addr, val) {
+      memory[addr & 0xFFFF] = val & 0xFF;
+      memory[(addr + 1) & 0xFFFF] = (val >> 8) & 0xFF;
+    }
+
+    function push16(val) {
+      cpu.sp = (cpu.sp - 2) & 0xFFFF;
+      memWrite16(cpu.sp, val);
+    }
+
+    function pop16() {
+      const val = memRead16(cpu.sp);
+      cpu.sp = (cpu.sp + 2) & 0xFFFF;
+      return val;
+    }
+
+    // Flag calculation helpers
+    function setZSP(val) {
+      cpu.f &= ~(FLAG_SIGN | FLAG_ZERO | FLAG_PARITY_OVERFLOW);
+      if ((val & 0xFF) === 0) cpu.f |= FLAG_ZERO;
+      if (val & 0x80) cpu.f |= FLAG_SIGN;
+      cpu.f |= parityTable[val & 0xFF];
+    }
+
+    function aluAdd8(val, carryIn = 0) {
+      const a = cpu.a;
+      const res = a + val + carryIn;
+      const r8 = res & 0xFF;
+      cpu.f = 0;
+      if (r8 === 0) cpu.f |= FLAG_ZERO;
+      if (r8 & 0x80) cpu.f |= FLAG_SIGN;
+      if (res > 0xFF) cpu.f |= FLAG_CARRY;
+      if (((a & 0x0F) + (val & 0x0F) + carryIn) > 0x0F) cpu.f |= FLAG_HALF_CARRY;
+      if (((a ^ ~val) & (a ^ r8) & 0x80) !== 0) cpu.f |= FLAG_PARITY_OVERFLOW;
+      cpu.a = r8;
+    }
+
+    function aluSub8(val, carryIn = 0) {
+      const a = cpu.a;
+      const res = a - val - carryIn;
+      const r8 = res & 0xFF;
+      cpu.f = FLAG_SUB;
+      if (r8 === 0) cpu.f |= FLAG_ZERO;
+      if (r8 & 0x80) cpu.f |= FLAG_SIGN;
+      if (res < 0) cpu.f |= FLAG_CARRY;
+      if (((a & 0x0F) - (val & 0x0F) - carryIn) < 0) cpu.f |= FLAG_HALF_CARRY;
+      if (((a ^ val) & (a ^ r8) & 0x80) !== 0) cpu.f |= FLAG_PARITY_OVERFLOW;
+      cpu.a = r8;
+    }
+
+    function aluAnd8(val) {
+      cpu.a &= val;
+      cpu.f = FLAG_HALF_CARRY;
+      setZSP(cpu.a);
+    }
+
+    function aluXor8(val) {
+      cpu.a ^= val;
+      cpu.f = 0;
+      setZSP(cpu.a);
+    }
+
+    function aluOr8(val) {
+      cpu.a |= val;
+      cpu.f = 0;
+      setZSP(cpu.a);
+    }
+
+    function aluCp8(val) {
+      const savedA = cpu.a;
+      aluSub8(val);
+      cpu.a = savedA;
+    }
+
+    function aluInc8(val) {
+      const r = (val + 1) & 0xFF;
+      cpu.f &= FLAG_CARRY;
+      if (r === 0) cpu.f |= FLAG_ZERO;
+      if (r & 0x80) cpu.f |= FLAG_SIGN;
+      if ((val & 0x0F) === 0x0F) cpu.f |= FLAG_HALF_CARRY;
+      if (val === 0x7F) cpu.f |= FLAG_PARITY_OVERFLOW;
+      return r;
+    }
+
+    function aluDec8(val) {
+      const r = (val - 1) & 0xFF;
+      cpu.f = (cpu.f & FLAG_CARRY) | FLAG_SUB;
+      if (r === 0) cpu.f |= FLAG_ZERO;
+      if (r & 0x80) cpu.f |= FLAG_SIGN;
+      if ((val & 0x0F) === 0) cpu.f |= FLAG_HALF_CARRY;
+      if (val === 0x80) cpu.f |= FLAG_PARITY_OVERFLOW;
+      return r;
+    }
+
+    function getReg8(code) {
+      switch (code) {
+        case 0: return cpu.b;
+        case 1: return cpu.c;
+        case 2: return cpu.d;
+        case 3: return cpu.e;
+        case 4: return cpu.h;
+        case 5: return cpu.l;
+        case 6: return memRead(getHL());
+        case 7: return cpu.a;
+      }
+    }
+
+    function setReg8(code, val) {
+      val &= 0xFF;
+      switch (code) {
+        case 0: cpu.b = val; break;
+        case 1: cpu.c = val; break;
+        case 2: cpu.d = val; break;
+        case 3: cpu.e = val; break;
+        case 4: cpu.h = val; break;
+        case 5: cpu.l = val; break;
+        case 6: memWrite(getHL(), val); break;
+        case 7: cpu.a = val; break;
+      }
+    }
+
+    // Instruction Decoder
+    function stepInstruction() {
+      if (cpu.halted) return 4;
+
+      const op = memRead(cpu.pc);
+      cpu.pc = (cpu.pc + 1) & 0xFFFF;
+
+      if (op === 0x00) return 4; // NOP
+      if (op === 0x76) { cpu.halted = true; return 4; } // HALT
+
+      // 8-bit loads LD r, r' (0x40 - 0x7F)
+      if (op >= 0x40 && op <= 0x7F) {
+        const dst = (op >> 3) & 7;
+        const src = op & 7;
+        setReg8(dst, getReg8(src));
+        return (dst === 6 || src === 6) ? 7 : 4;
+      }
+
+      // LD r, n (0x06, 0x0E, 0x16, 0x1E, 0x26, 0x2E, 0x36, 0x3E)
+      if ((op & 0xC7) === 0x06) {
+        const r = (op >> 3) & 7;
+        const n = memRead(cpu.pc);
+        cpu.pc = (cpu.pc + 1) & 0xFFFF;
+        setReg8(r, n);
+        return (r === 6) ? 10 : 7;
+      }
+
+      // 16-bit loads LD rr, nn (0x01, 0x11, 0x21, 0x31)
+      if (op === 0x01) { setBC(memRead16(cpu.pc)); cpu.pc = (cpu.pc + 2) & 0xFFFF; return 10; }
+      if (op === 0x11) { setDE(memRead16(cpu.pc)); cpu.pc = (cpu.pc + 2) & 0xFFFF; return 10; }
+      if (op === 0x21) { setHL(memRead16(cpu.pc)); cpu.pc = (cpu.pc + 2) & 0xFFFF; return 10; }
+      if (op === 0x31) { cpu.sp = memRead16(cpu.pc); cpu.pc = (cpu.pc + 2) & 0xFFFF; return 10; }
+
+      // LD (BC), A / LD (DE), A
+      if (op === 0x02) { memWrite(getBC(), cpu.a); return 7; }
+      if (op === 0x12) { memWrite(getDE(), cpu.a); return 7; }
+      // LD A, (BC) / LD A, (DE)
+      if (op === 0x0A) { cpu.a = memRead(getBC()); return 7; }
+      if (op === 0x1A) { cpu.a = memRead(getDE()); return 7; }
+
+      // LD (nn), HL / LD HL, (nn)
+      if (op === 0x22) {
+        const nn = memRead16(cpu.pc); cpu.pc = (cpu.pc + 2) & 0xFFFF;
+        memWrite16(nn, getHL()); return 16;
+      }
+      if (op === 0x2A) {
+        const nn = memRead16(cpu.pc); cpu.pc = (cpu.pc + 2) & 0xFFFF;
+        setHL(memRead16(nn)); return 16;
+      }
+
+      // LD (nn), A / LD A, (nn)
+      if (op === 0x32) {
+        const nn = memRead16(cpu.pc); cpu.pc = (cpu.pc + 2) & 0xFFFF;
+        memWrite(nn, cpu.a); return 13;
+      }
+      if (op === 0x3A) {
+        const nn = memRead16(cpu.pc); cpu.pc = (cpu.pc + 2) & 0xFFFF;
+        cpu.a = memRead(nn); return 13;
+      }
+
+      // INC rr / DEC rr
+      if (op === 0x03) { setBC((getBC() + 1) & 0xFFFF); return 6; }
+      if (op === 0x13) { setDE((getDE() + 1) & 0xFFFF); return 6; }
+      if (op === 0x23) { setHL((getHL() + 1) & 0xFFFF); return 6; }
+      if (op === 0x33) { cpu.sp = (cpu.sp + 1) & 0xFFFF; return 6; }
+
+      if (op === 0x0B) { setBC((getBC() - 1) & 0xFFFF); return 6; }
+      if (op === 0x1B) { setDE((getDE() - 1) & 0xFFFF); return 6; }
+      if (op === 0x2B) { setHL((getHL() - 1) & 0xFFFF); return 6; }
+      if (op === 0x3B) { cpu.sp = (cpu.sp - 1) & 0xFFFF; return 6; }
+
+      // INC r / DEC r
+      if ((op & 0xC7) === 0x04) {
+        const r = (op >> 3) & 7;
+        setReg8(r, aluInc8(getReg8(r)));
+        return (r === 6) ? 11 : 4;
+      }
+      if ((op & 0xC7) === 0x05) {
+        const r = (op >> 3) & 7;
+        setReg8(r, aluDec8(getReg8(r)));
+        return (r === 6) ? 11 : 4;
+      }
+
+      // ADD HL, rr
+      if ((op & 0xCF) === 0x09) {
+        const rr = (op >> 4) & 3;
+        let val = 0;
+        if (rr === 0) val = getBC();
+        else if (rr === 1) val = getDE();
+        else if (rr === 2) val = getHL();
+        else val = cpu.sp;
+        const hl = getHL();
+        const sum = hl + val;
+        cpu.f &= ~(FLAG_SUB | FLAG_CARRY | FLAG_HALF_CARRY);
+        if (sum > 0xFFFF) cpu.f |= FLAG_CARRY;
+        if (((hl & 0x0FFF) + (val & 0x0FFF)) > 0x0FFF) cpu.f |= FLAG_HALF_CARRY;
+        setHL(sum & 0xFFFF);
+        return 11;
+      }
+
+      // ALU operations with register (0x80 - 0xBF)
+      if (op >= 0x80 && op <= 0xBF) {
+        const val = getReg8(op & 7);
+        const aluOp = (op >> 3) & 7;
+        switch (aluOp) {
+          case 0: aluAdd8(val); break;
+          case 1: aluAdd8(val, (cpu.f & FLAG_CARRY) ? 1 : 0); break;
+          case 2: aluSub8(val); break;
+          case 3: aluSub8(val, (cpu.f & FLAG_CARRY) ? 1 : 0); break;
+          case 4: aluAnd8(val); break;
+          case 5: aluXor8(val); break;
+          case 6: aluOr8(val); break;
+          case 7: aluCp8(val); break;
+        }
+        return ((op & 7) === 6) ? 7 : 4;
+      }
+
+      // ALU operations with immediate n
+      if ((op & 0xC7) === 0xC6) {
+        const val = memRead(cpu.pc); cpu.pc = (cpu.pc + 1) & 0xFFFF;
+        const aluOp = (op >> 3) & 7;
+        switch (aluOp) {
+          case 0: aluAdd8(val); break;
+          case 1: aluAdd8(val, (cpu.f & FLAG_CARRY) ? 1 : 0); break;
+          case 2: aluSub8(val); break;
+          case 3: aluSub8(val, (cpu.f & FLAG_CARRY) ? 1 : 0); break;
+          case 4: aluAnd8(val); break;
+          case 5: aluXor8(val); break;
+          case 6: aluOr8(val); break;
+          case 7: aluCp8(val); break;
+        }
+        return 7;
+      }
+
+      // CPL (0x2F)
+      if (op === 0x2F) {
+        cpu.a = (~cpu.a) & 0xFF;
+        cpu.f |= (FLAG_HALF_CARRY | FLAG_SUB);
+        return 4;
+      }
+
+      // Jumps and loops
+      if (op === 0xC3) {
+        cpu.pc = memRead16(cpu.pc);
+        return 10;
+      }
+      if ((op & 0xC7) === 0xC2) {
+        const nn = memRead16(cpu.pc); cpu.pc = (cpu.pc + 2) & 0xFFFF;
+        const cc = (op >> 3) & 7;
+        let take = false;
+        if (cc === 0 && !(cpu.f & FLAG_ZERO)) take = true;
+        else if (cc === 1 && (cpu.f & FLAG_ZERO)) take = true;
+        else if (cc === 2 && !(cpu.f & FLAG_CARRY)) take = true;
+        else if (cc === 3 && (cpu.f & FLAG_CARRY)) take = true;
+        if (take) cpu.pc = nn;
+        return 10;
+      }
+      if (op === 0x18) {
+        let e = memRead(cpu.pc); cpu.pc = (cpu.pc + 1) & 0xFFFF;
+        if (e >= 128) e -= 256;
+        cpu.pc = (cpu.pc + e) & 0xFFFF;
+        return 12;
+      }
+      if ((op & 0xE7) === 0x20) {
+        let e = memRead(cpu.pc); cpu.pc = (cpu.pc + 1) & 0xFFFF;
+        if (e >= 128) e -= 256;
+        const cc = (op >> 3) & 3;
+        let take = false;
+        if (cc === 0 && !(cpu.f & FLAG_ZERO)) take = true;
+        else if (cc === 1 && (cpu.f & FLAG_ZERO)) take = true;
+        else if (cc === 2 && !(cpu.f & FLAG_CARRY)) take = true;
+        else if (cc === 3 && (cpu.f & FLAG_CARRY)) take = true;
+        if (take) { cpu.pc = (cpu.pc + e) & 0xFFFF; return 12; }
+        return 7;
+      }
+      if (op === 0x10) {
+        let e = memRead(cpu.pc); cpu.pc = (cpu.pc + 1) & 0xFFFF;
+        if (e >= 128) e -= 256;
+        cpu.b = (cpu.b - 1) & 0xFF;
+        if (cpu.b !== 0) {
+          cpu.pc = (cpu.pc + e) & 0xFFFF;
+          return 13;
+        }
+        return 8;
+      }
+
+      // Calls and Returns
+      if (op === 0xCD) {
+        const nn = memRead16(cpu.pc); cpu.pc = (cpu.pc + 2) & 0xFFFF;
+        push16(cpu.pc);
+        cpu.pc = nn;
+        return 17;
+      }
+      if (op === 0xC9) {
+        cpu.pc = pop16();
+        return 10;
+      }
+
+      // PUSH / POP
+      if ((op & 0xCF) === 0xC5) {
+        const rr = (op >> 4) & 3;
+        if (rr === 0) push16(getBC());
+        else if (rr === 1) push16(getDE());
+        else if (rr === 2) push16(getHL());
+        else push16(getAF());
+        return 11;
+      }
+      if ((op & 0xCF) === 0xC1) {
+        const rr = (op >> 4) & 3;
+        if (rr === 0) setBC(pop16());
+        else if (rr === 1) setDE(pop16());
+        else if (rr === 2) setHL(pop16());
+        else setAF(pop16());
+        return 10;
+      }
+
+      // Exchanges
+      if (op === 0xEB) {
+        const t = getDE(); setDE(getHL()); setHL(t);
+        return 4;
+      }
+      if (op === 0x08) {
+        const ta = cpu.a, tf = cpu.f;
+        cpu.a = cpu.a_; cpu.f = cpu.f_;
+        cpu.a_ = ta; cpu.f_ = tf;
+        return 4;
+      }
+      if (op === 0xD9) {
+        let tb = cpu.b, tc = cpu.c, td = cpu.d, te = cpu.e, th = cpu.h, tl = cpu.l;
+        cpu.b = cpu.b_; cpu.c = cpu.c_; cpu.d = cpu.d_; cpu.e = cpu.e_; cpu.h = cpu.h_; cpu.l = cpu.l_;
+        cpu.b_ = tb; cpu.c_ = tc; cpu.d_ = td; cpu.e_ = te; cpu.h_ = th; cpu.l_ = tl;
+        return 4;
+      }
+
+      // Prefixed: 0xCB
+      if (op === 0xCB) {
+        const cbOp = memRead(cpu.pc); cpu.pc = (cpu.pc + 1) & 0xFFFF;
+        const b = (cbOp >> 3) & 7;
+        const r = cbOp & 7;
+        let val = getReg8(r);
+
+        if (cbOp >= 0x40 && cbOp <= 0x7F) { // BIT
+          cpu.f = (cpu.f & FLAG_CARRY) | FLAG_HALF_CARRY;
+          if (((val >> b) & 1) === 0) cpu.f |= (FLAG_ZERO | FLAG_PARITY_OVERFLOW);
+          return (r === 6) ? 12 : 8;
+        }
+        if (cbOp >= 0x80 && cbOp <= 0xBF) { // RES
+          val &= ~(1 << b);
+          setReg8(r, val);
+          return (r === 6) ? 15 : 8;
+        }
+        if (cbOp >= 0xC0) { // SET
+          val |= (1 << b);
+          setReg8(r, val);
+          return (r === 6) ? 15 : 8;
+        }
+        if (b === 0) { // RLC
+          const c = (val >> 7) & 1; val = ((val << 1) | c) & 0xFF;
+          cpu.f = c ? FLAG_CARRY : 0; setZSP(val);
+        } else if (b === 1) { // RRC
+          const c = val & 1; val = (val >> 1) | (c << 7);
+          cpu.f = c ? FLAG_CARRY : 0; setZSP(val);
+        }
+        setReg8(r, val);
+        return (r === 6) ? 15 : 8;
+      }
+
+      // Prefixed: 0xED
+      if (op === 0xED) {
+        const edOp = memRead(cpu.pc); cpu.pc = (cpu.pc + 1) & 0xFFFF;
+        if (edOp === 0xB0) { // LDIR
+          const bVal = memRead(getHL());
+          memWrite(getDE(), bVal);
+          setHL((getHL() + 1) & 0xFFFF);
+          setDE((getDE() + 1) & 0xFFFF);
+          const bc = (getBC() - 1) & 0xFFFF;
+          setBC(bc);
+          if (bc !== 0) {
+            cpu.pc = (cpu.pc - 2) & 0xFFFF;
+            return 21;
+          }
+          cpu.f &= ~(FLAG_HALF_CARRY | FLAG_SUB | FLAG_PARITY_OVERFLOW);
+          return 16;
+        }
+        if (edOp === 0xB8) { // LDDR
+          const bVal = memRead(getHL());
+          memWrite(getDE(), bVal);
+          setHL((getHL() - 1) & 0xFFFF);
+          setDE((getDE() - 1) & 0xFFFF);
+          const bc = (getBC() - 1) & 0xFFFF;
+          setBC(bc);
+          if (bc !== 0) {
+            cpu.pc = (cpu.pc - 2) & 0xFFFF;
+            return 21;
+          }
+          cpu.f &= ~(FLAG_HALF_CARRY | FLAG_SUB | FLAG_PARITY_OVERFLOW);
+          return 16;
+        }
+        return 8;
+      }
+
+      return 4;
+    }
+
+    // Hex String Bytecode Loader
+    function loadHexProgram(hexStr) {
+      const clean = hexStr.replace(/[^0-9A-Fa-f]/g, ' ');
+      const tokens = clean.trim().split(/\s+/);
+      const bytes = [];
+      for (const tok of tokens) {
+        if (tok.length > 0) {
+          bytes.push(parseInt(tok, 16) & 0xFF);
+        }
+      }
+
+      memory.fill(0);
+      cpu.a = 0; cpu.f = 0;
+      cpu.b = 0; cpu.c = 0;
+      cpu.d = 0; cpu.e = 0;
+      cpu.h = 0; cpu.l = 0;
+      cpu.a_ = 0; cpu.f_ = 0;
+      cpu.b_ = 0; cpu.c_ = 0;
+      cpu.d_ = 0; cpu.e_ = 0;
+      cpu.h_ = 0; cpu.l_ = 0;
+      cpu.sp = 0xFF00;
+      cpu.pc = 0x0000;
+      cpu.halted = false;
+
+      for (let i = 0; i < bytes.length; i++) {
+        memory[i] = bytes[i];
+      }
+    }
+
+    // STRICT Literal Bytecode Sequences from catalog.code
+    const PRESET_PROGRAMS = {
+      // 1. Moving Square (catalog.code.square_move)
+      square_move: "31 00 FF AF 32 80 00 3A 80 00 5F 16 00 21 00 DE 19 06 10 3E FF 77 23 77 11 3B 00 19 10 F7 01 00 18 0B 78 B1 20 FB 3A 80 00 5F 16 00 21 00 DE 19 06 10 AF 77 23 77 11 3B 00 19 10 F7 3A 80 00 3C FE 3A 20 01 AF 32 80 00 C3 07 00",
+
+      // 2. Vertical Scanlines (catalog.code.vertical_scanlines)
+      vertical_scanlines: "31 00 FF 3E AA 32 00 C0 21 00 C0 11 01 C0 01 BF 3F ED B0 01 00 80 0B 78 78 B1 7A 20 F9 2F C3 05 00",
+
+      // 3. Blinking Cursor (catalog.code.blinking_cursor)
+      blinking_cursor: "31 00 FF 21 1E DE 06 10 3E FF 77 11 3C 00 19 10 F9 01 00 80 0B 78 B1 20 FB 21 1E DE 06 10 AF 77 11 3C 00 19 10 F9 01 00 80 0B 78 B1 20 FB C3 03 00"
+    };
+
+    // Framebuffer Blitter
+    const canvas = document.getElementById("screen");
+    const ctx = canvas.getContext("2d", { alpha: false });
+    const imgData = ctx.createImageData(SCREEN_WIDTH, SCREEN_HEIGHT);
+    const data32 = new Uint32Array(imgData.data.buffer);
+
+    const COLOR_PIXEL_ON = 0xFF14FF39; // RGBA bright phosphor green (#39ff14)
+    const COLOR_PIXEL_OFF = 0xFF0D0F0A; // RGBA dark background (#0a0f0d)
+
+    function renderFramebuffer() {
+      let pixelIndex = 0;
+      let vramPtr = VRAM_START;
+
+      for (let y = 0; y < SCREEN_HEIGHT; y++) {
+        for (let byteCol = 0; byteCol < BYTES_PER_ROW; byteCol++) {
+          const vramByte = memory[vramPtr++];
+          data32[pixelIndex++] = (vramByte & 0x80) ? COLOR_PIXEL_ON : COLOR_PIXEL_OFF;
+          data32[pixelIndex++] = (vramByte & 0x40) ? COLOR_PIXEL_ON : COLOR_PIXEL_OFF;
+          data32[pixelIndex++] = (vramByte & 0x20) ? COLOR_PIXEL_ON : COLOR_PIXEL_OFF;
+          data32[pixelIndex++] = (vramByte & 0x10) ? COLOR_PIXEL_ON : COLOR_PIXEL_OFF;
+          data32[pixelIndex++] = (vramByte & 0x08) ? COLOR_PIXEL_ON : COLOR_PIXEL_OFF;
+          data32[pixelIndex++] = (vramByte & 0x04) ? COLOR_PIXEL_ON : COLOR_PIXEL_OFF;
+          data32[pixelIndex++] = (vramByte & 0x02) ? COLOR_PIXEL_ON : COLOR_PIXEL_OFF;
+          data32[pixelIndex++] = (vramByte & 0x01) ? COLOR_PIXEL_ON : COLOR_PIXEL_OFF;
+        }
+      }
+
+      ctx.putImageData(imgData, 0, 0);
+    }
+
+    // Execution Loop
+    let isRunning = true;
+    const CYCLES_PER_FRAME = 70000; // ~3.5 MHz equivalent at 60 FPS
+
+    function mainLoop() {
+      if (isRunning && !cpu.halted) {
+        let cyclesExecuted = 0;
+        while (cyclesExecuted < CYCLES_PER_FRAME && !cpu.halted) {
+          cyclesExecuted += stepInstruction();
+        }
+      }
+
+      renderFramebuffer();
+
+      document.getElementById("stats-display").textContent = 
+        `PC: 0x${cpu.pc.toString(16).padStart(4, '0').toUpperCase()} | HL: 0x${getHL().toString(16).padStart(4, '0').toUpperCase()} | A: 0x${cpu.a.toString(16).padStart(2, '0').toUpperCase()}`;
+
+      requestAnimationFrame(mainLoop);
+    }
+
+    // UI Event Handlers
+    const btnPlayPause = document.getElementById("btn-play-pause");
+    const btnText = document.getElementById("btn-text");
+    const btnIcon = document.getElementById("btn-icon");
+    const selectProgram = document.getElementById("select-program");
+    const btnToggleHex = document.getElementById("btn-toggle-hex");
+    const hexModal = document.getElementById("hex-modal");
+    const btnLoadRun = document.getElementById("btn-load-run");
+    const hexInputText = document.getElementById("hex-input-text");
+
+    btnPlayPause.addEventListener("click", () => {
+      isRunning = !isRunning;
+      if (isRunning) {
+        btnText.textContent = "Pause";
+        btnIcon.textContent = "⏸";
+        btnPlayPause.classList.remove("paused");
+      } else {
+        btnText.textContent = "Play";
+        btnIcon.textContent = "▶";
+        btnPlayPause.classList.add("paused");
+      }
+    });
+
+    selectProgram.addEventListener("change", (e) => {
+      const selected = e.target.value;
+      const hex = PRESET_PROGRAMS[selected];
+      if (hex) {
+        loadHexProgram(hex);
+        hexInputText.value = hex.trim();
+        isRunning = true;
+        btnText.textContent = "Pause";
+        btnIcon.textContent = "⏸";
+        btnPlayPause.classList.remove("paused");
+      }
+    });
+
+    btnToggleHex.addEventListener("click", () => {
+      hexModal.classList.toggle("active");
+    });
+
+    btnLoadRun.addEventListener("click", () => {
+      const hex = hexInputText.value;
+      if (hex.trim().length > 0) {
+        loadHexProgram(hex);
+        isRunning = true;
+        btnText.textContent = "Pause";
+        btnIcon.textContent = "⏸";
+        btnPlayPause.classList.remove("paused");
+      }
+    });
+
+    // Initial Program Load
+    const defaultProgram = PRESET_PROGRAMS.square_move;
+    hexInputText.value = defaultProgram.trim();
+    loadHexProgram(defaultProgram);
+
+    requestAnimationFrame(mainLoop);
+  </script>
+</body>
+</html>

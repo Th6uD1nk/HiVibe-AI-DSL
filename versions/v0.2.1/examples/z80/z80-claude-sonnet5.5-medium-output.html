@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Z80 Framebuffer</title>
+<style>
+  :root {
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    --bg: #0a0f0d;
+    --fg: #39ff14;
+    --line: #1f3d1a;
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); background: var(--bg); }
+  body {
+    box-sizing: border-box;
+    margin: 0;
+    min-height: 100vh;
+    padding: 16px;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+  }
+  .frame {
+    width: 100%;
+    max-width: 960px;
+    padding: 10px;
+    border: 2px solid var(--line);
+    border-radius: 10px;
+    box-sizing: border-box;
+    box-shadow: 0 0 24px rgba(57, 255, 20, 0.12);
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    aspect-ratio: 480 / 272;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    background: var(--bg);
+  }
+  .bar { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  select, button, textarea, summary {
+    font: inherit;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 12px;
+  }
+  button, summary { cursor: pointer; }
+  details { width: 100%; max-width: 960px; }
+  textarea { width: 100%; box-sizing: border-box; margin: 10px 0; resize: vertical; }
+</style>
+</head>
+<body>
+<div class="frame"><canvas id="screen" width="480" height="272"></canvas></div>
+<div class="bar">
+  <select id="prog">
+    <option value="0">Moving Square (Left to Right)</option>
+    <option value="1">Vertical Scanlines</option>
+    <option value="2">Blinking Cursor</option>
+  </select>
+  <button id="toggle">Pause</button>
+</div>
+<details>
+  <summary>Custom hex bytecode</summary>
+  <textarea id="hex" rows="4" spellcheck="false" placeholder="21 00 C0 3E FF 77"></textarea>
+  <button id="load">Load &amp; Run</button>
+</details>
+<script>
+const SCREEN_WIDTH = 480
+const SCREEN_HEIGHT = 272
+const BYTES_PER_ROW = 60
+const VRAM_SIZE = 16320
+const VRAM_START = 0xC000
+const VRAM_END = 0xFFBF
+const TOTAL_RAM = 65536
+
+const FLAG_CARRY = 0x01
+const FLAG_SUB = 0x02
+const FLAG_PARITY_OVERFLOW = 0x04
+const FLAG_HALF_CARRY = 0x10
+const FLAG_ZERO = 0x40
+const FLAG_SIGN = 0x80
+
+const PROGRAMS = [
+  "31 00 FF AF 32 80 00 3A 80 00 5F 16 00 21 00 DE 19 06 10 3E FF 77 23 77 11 3B 00 19 10 F7 01 00 18 0B 78 B1 20 FB 3A 80 00 5F 16 00 21 00 DE 19 06 10 AF 77 23 77 11 3B 00 19 10 F7 3A 80 00 3C FE 3A 20 01 AF 32 80 00 C3 07 00",
+  "31 00 FF 3E AA 32 00 C0 21 00 C0 11 01 C0 01 BF 3F ED B0 01 00 80 0B 78 78 B1 7A 20 F9 2F C3 05 00",
+  "31 00 FF 21 1E DE 06 10 3E FF 77 11 3C 00 19 10 F9 01 00 80 0B 78 B1 20 FB 21 1E DE 06 10 AF 77 11 3C 00 19 10 F9 01 00 80 0B 78 B1 20 FB C3 03 00"
+]
+
+const mem = new Uint8Array(TOTAL_RAM)
+const R = new Uint8Array(8)
+const A2 = new Uint8Array(8)
+let pc = 0, sp = 0xFF00, ix = 0, iy = 0, idx = 0, EA = -1
+let halted = false, running = true
+
+const rd = a => mem[a & 0xFFFF]
+const wr = (a, v) => { mem[a & 0xFFFF] = v }
+const rd16 = a => rd(a) | rd(a + 1) << 8
+const wr16 = (a, v) => { wr(a, v & 255); wr(a + 1, v >> 8 & 255) }
+const fetch = () => { const v = rd(pc); pc = pc + 1 & 0xFFFF; return v }
+const fetch16 = () => { const l = fetch(); return l | fetch() << 8 }
+const sx = v => v << 24 >> 24
+
+const hl = () => idx === 1 ? ix : idx === 2 ? iy : R[4] << 8 | R[5]
+const sethl = v => {
+  v &= 0xFFFF
+  if (idx === 1) ix = v
+  else if (idx === 2) iy = v
+  else { R[4] = v >> 8; R[5] = v }
+}
+const ea = () => {
+  if (EA < 0) EA = idx ? hl() + sx(fetch()) & 0xFFFF : hl()
+  return EA
+}
+const get8 = i => i === 6 ? rd(ea()) : R[i]
+const set8 = (i, v) => { if (i === 6) wr(ea(), v); else R[i] = v }
+
+const gp = i => i === 0 ? R[0] << 8 | R[1] : i === 1 ? R[2] << 8 | R[3] : i === 2 ? hl() : sp
+const sp16 = (i, v) => {
+  v &= 0xFFFF
+  if (i === 0) { R[0] = v >> 8; R[1] = v }
+  else if (i === 1) { R[2] = v >> 8; R[3] = v }
+  else if (i === 2) sethl(v)
+  else sp = v
+}
+const gq = i => i === 3 ? R[7] << 8 | R[6] : gp(i)
+const sq = (i, v) => { if (i === 3) { R[7] = v >> 8; R[6] = v } else sp16(i, v) }
+const push = v => { sp = sp - 2 & 0xFFFF; wr16(sp, v) }
+const pop = () => { const v = rd16(sp); sp = sp + 2 & 0xFFFF; return v }
+
+const sz = t => (t & FLAG_SIGN) | ((t & 255) ? 0 : FLAG_ZERO)
+const par = t => {
+  let p = 1
+  for (let i = 0; i < 8; i++) p ^= t >> i & 1
+  return p ? FLAG_PARITY_OVERFLOW : 0
+}
+const cc = y => {
+  const m = [FLAG_ZERO, FLAG_CARRY, FLAG_PARITY_OVERFLOW, FLAG_SIGN][y >> 1]
+  return !!(R[6] & m) === !!(y & 1)
+}
+const jr = () => { const d = sx(fetch()); pc = pc + d & 0xFFFF }
+
+function alu(op, v) {
+  const a = R[7]
+  const c = (op === 1 || op === 3) ? R[6] & FLAG_CARRY : 0
+  let t
+  if (op < 2) {
+    t = a + v + c
+    R[6] = sz(t) | ((a ^ v ^ t) & FLAG_HALF_CARRY) | (~(a ^ v) & (a ^ t) & 0x80 ? FLAG_PARITY_OVERFLOW : 0) | (t >> 8 & 1)
+  } else if (op === 2 || op === 3 || op === 7) {
+    t = a - v - c
+    R[6] = sz(t) | ((a ^ v ^ t) & FLAG_HALF_CARRY) | ((a ^ v) & (a ^ t) & 0x80 ? FLAG_PARITY_OVERFLOW : 0) | FLAG_SUB | (t >> 8 & 1)
+  } else {
+    t = op === 4 ? a & v : op === 5 ? a ^ v : a | v
+    R[6] = sz(t) | par(t) | (op === 4 ? FLAG_HALF_CARRY : 0)
+  }
+  if (op !== 7) R[7] = t
+}
+
+function inc(v) {
+  const t = v + 1 & 255
+  R[6] = (R[6] & FLAG_CARRY) | sz(t) | ((v & 15) === 15 ? FLAG_HALF_CARRY : 0) | (v === 0x7F ? FLAG_PARITY_OVERFLOW : 0)
+  return t
+}
+
+function dec(v) {
+  const t = v - 1 & 255
+  R[6] = (R[6] & FLAG_CARRY) | sz(t) | FLAG_SUB | ((v & 15) === 0 ? FLAG_HALF_CARRY : 0) | (v === 0x80 ? FLAG_PARITY_OVERFLOW : 0)
+  return t
+}
+
+function daa() {
+  const a = R[7], f = R[6], n = f & FLAG_SUB
+  let adj = 0, c = f & FLAG_CARRY
+  if ((f & FLAG_HALF_CARRY) || (a & 15) > 9) adj |= 6
+  if (c || a > 0x99) { adj |= 0x60; c = 1 }
+  const t = (n ? a - adj : a + adj) & 255
+  const h = n ? ((f & FLAG_HALF_CARRY) && (a & 15) < 6) : ((a & 15) > 9)
+  R[7] = t
+  R[6] = sz(t) | par(t) | n | c | (h ? FLAG_HALF_CARRY : 0)
+}
+
+function op0(y, z) {
+  switch (z) {
+    case 0:
+      if (y === 0) break
+      if (y === 1) {
+        let t = R[7]; R[7] = A2[7]; A2[7] = t
+        t = R[6]; R[6] = A2[6]; A2[6] = t
+        break
+      }
+      if (y === 2) {
+        R[0] = R[0] - 1 & 255
+        if (R[0]) jr(); else fetch()
+        break
+      }
+      if (y === 3) { jr(); break }
+      if (cc(y - 4)) jr(); else fetch()
+      break
+    case 1:
+      if (y & 1) {
+        const h = hl(), v = gp(y >> 1), t = h + v
+        R[6] = (R[6] & 0xC4) | ((h ^ v ^ t) >> 8 & FLAG_HALF_CARRY) | (t >> 16 & 1)
+        sethl(t)
+      } else sp16(y >> 1, fetch16())
+      break
+    case 2:
+      switch (y) {
+        case 0: wr(gp(0), R[7]); break
+        case 1: R[7] = rd(gp(0)); break
+        case 2: wr(gp(1), R[7]); break
+        case 3: R[7] = rd(gp(1)); break
+        case 4: wr16(fetch16(), hl()); break
+        case 5: sethl(rd16(fetch16())); break
+        case 6: wr(fetch16(), R[7]); break
+        default: R[7] = rd(fetch16())
+      }
+      break
+    case 3: sp16(y >> 1, gp(y >> 1) + (y & 1 ? -1 : 1)); break
+    case 4: set8(y, inc(get8(y))); break
+    case 5: set8(y, dec(get8(y))); break
+    case 6:
+      if (y === 6) ea()
+      set8(y, fetch())
+      break
+    default: {
+      let a = R[7], c
+      switch (y) {
+        case 0: c = a >> 7; a = a << 1 | c; R[6] = (R[6] & 0xC4) | c; break
+        case 1: c = a & 1; a = a >> 1 | c << 7; R[6] = (R[6] & 0xC4) | c; break
+        case 2: c = a >> 7; a = a << 1 | R[6] & 1; R[6] = (R[6] & 0xC4) | c; break
+        case 3: c = a & 1; a = a >> 1 | (R[6] & 1) << 7; R[6] = (R[6] & 0xC4) | c; break
+        case 4: daa(); return
+        case 5: a ^= 255; R[6] |= 0x12; break
+        case 6: R[6] = (R[6] & 0xC4) | 1; break
+        default: c = R[6] & 1; R[6] = (R[6] & 0xC4) | (c ? FLAG_HALF_CARRY : 0) | (c ^ 1)
+      }
+      R[7] = a
+    }
+  }
+}
+
+function cb() {
+  let o
+  if (idx) { ea(); o = fetch() } else o = fetch()
+  const x = o >> 6, y = o >> 3 & 7, z = idx ? 6 : o & 7, v = get8(z)
+  if (x === 0) {
+    let c, t
+    switch (y) {
+      case 0: c = v >> 7; t = v << 1 | c; break
+      case 1: c = v & 1; t = v >> 1 | c << 7; break
+      case 2: c = v >> 7; t = v << 1 | R[6] & 1; break
+      case 3: c = v & 1; t = v >> 1 | (R[6] & 1) << 7; break
+      case 4: c = v >> 7; t = v << 1; break
+      case 5: c = v & 1; t = v >> 1 | v & 0x80; break
+      case 6: c = v >> 7; t = v << 1 | 1; break
+      default: c = v & 1; t = v >> 1
+    }
+    t &= 255
+    R[6] = sz(t) | par(t) | c
+    set8(z, t)
+  } else if (x === 1) {
+    R[6] = (R[6] & FLAG_CARRY) | FLAG_HALF_CARRY | ((v >> y & 1) ? 0 : (FLAG_ZERO | FLAG_PARITY_OVERFLOW)) | ((y === 7 && (v & 0x80)) ? FLAG_SIGN : 0)
+  } else set8(z, x === 2 ? v & ~(1 << y) : v | 1 << y)
+}
+
+function ed() {
+  const o = fetch(), x = o >> 6, y = o >> 3 & 7, z = o & 7
+  if (x === 1) {
+    if (z === 2) {
+      const h = R[4] << 8 | R[5], v = gp(y >> 1), c = R[6] & 1
+      let t, f
+      if (y & 1) {
+        t = h + v + c
+        f = (t >> 8 & 0x80) | ((t & 0xFFFF) ? 0 : FLAG_ZERO) | ((h ^ v ^ t) >> 8 & FLAG_HALF_CARRY) | (~(h ^ v) & (h ^ t) & 0x8000 ? FLAG_PARITY_OVERFLOW : 0) | (t >> 16 & 1)
+      } else {
+        t = h - v - c
+        f = (t >> 8 & 0x80) | ((t & 0xFFFF) ? 0 : FLAG_ZERO) | ((h ^ v ^ t) >> 8 & FLAG_HALF_CARRY) | FLAG_SUB | ((h ^ v) & (h ^ t) & 0x8000 ? FLAG_PARITY_OVERFLOW : 0) | (t >> 16 & 1)
+      }
+      R[6] = f; R[4] = t >> 8; R[5] = t
+    } else if (z === 3) {
+      const n = fetch16()
+      if (y & 1) sp16(y >> 1, rd16(n)); else wr16(n, gp(y >> 1))
+    } else if (z === 4) {
+      const a = R[7]; R[7] = 0; alu(2, a)
+    } else if (z === 5) pc = pop()
+  } else if (x === 2 && y >= 4 && z < 2) {
+    const dir = y & 1 ? -1 : 1, rep = y >= 6, v = rd(gp(2))
+    if (z === 0) {
+      wr(gp(1), v)
+      sp16(1, gp(1) + dir); sp16(2, gp(2) + dir); sp16(0, gp(0) - 1)
+      R[6] = (R[6] & 0xC1) | (gp(0) ? FLAG_PARITY_OVERFLOW : 0)
+      if (rep && gp(0)) pc = pc - 2 & 0xFFFF
+    } else {
+      const t = R[7] - v
+      sp16(2, gp(2) + dir); sp16(0, gp(0) - 1)
+      R[6] = (R[6] & FLAG_CARRY) | FLAG_SUB | sz(t) | ((R[7] ^ v ^ t) & FLAG_HALF_CARRY) | (gp(0) ? FLAG_PARITY_OVERFLOW : 0)
+      if (rep && gp(0) && (t & 255)) pc = pc - 2 & 0xFFFF
+    }
+  }
+}
+
+function op3(y, z) {
+  switch (z) {
+    case 0: if (cc(y)) pc = pop(); break
+    case 1:
+      if (!(y & 1)) sq(y >> 1, pop())
+      else if (y === 1) pc = pop()
+      else if (y === 3) { for (let i = 0; i < 6; i++) { const t = R[i]; R[i] = A2[i]; A2[i] = t } }
+      else if (y === 5) pc = hl()
+      else sp = hl()
+      break
+    case 2: { const n = fetch16(); if (cc(y)) pc = n; break }
+    case 3:
+      if (y === 0) pc = fetch16()
+      else if (y === 1) cb()
+      else if (y === 4) { const t = rd16(sp); wr16(sp, hl()); sethl(t) }
+      else if (y === 5) { const d = gp(1), h = R[4] << 8 | R[5]; sp16(1, h); R[4] = d >> 8; R[5] = d }
+      break
+    case 4: { const n = fetch16(); if (cc(y)) { push(pc); pc = n } break }
+    case 5:
+      if (!(y & 1)) push(gq(y >> 1))
+      else if (y === 1) { const n = fetch16(); push(pc); pc = n }
+      break
+    case 6: alu(y, fetch()); break
+    default: push(pc); pc = y * 8
+  }
+}
+
+function step() {
+  if (halted) return
+  EA = -1
+  idx = 0
+  let op = fetch()
+  while (op === 0xDD || op === 0xFD) { idx = op === 0xDD ? 1 : 2; op = fetch() }
+  if (op === 0xED) { idx = 0; ed(); return }
+  const x = op >> 6, y = op >> 3 & 7, z = op & 7
+  if (x === 1) {
+    if (op === 0x76) halted = true; else set8(y, get8(z))
+  } else if (x === 2) alu(y, get8(z))
+  else if (x === 0) op0(y, z)
+  else op3(y, z)
+}
+
+function resetCpu() {
+  R.fill(0); A2.fill(0)
+  pc = 0; sp = 0xFF00; ix = 0; iy = 0; idx = 0
+  halted = false
+}
+
+function parseHex(s) {
+  const tokens = s.replace(/\/\/.*$/gm, "").replace(/0x/gi, " ").match(/[0-9a-fA-F]+/g) || []
+  const out = []
+  for (const w of tokens) {
+    const p = w.length % 2 ? "0" + w : w
+    for (let i = 0; i < p.length; i += 2) out.push(parseInt(p.slice(i, i + 2), 16))
+  }
+  return out
+}
+
+const screen = document.getElementById("screen")
+const ctx = screen.getContext("2d")
+const img = ctx.createImageData(SCREEN_WIDTH, SCREEN_HEIGHT)
+const px = new Uint32Array(img.data.buffer)
+const toggle = document.getElementById("toggle")
+const prog = document.getElementById("prog")
+const hex = document.getElementById("hex")
+
+function sync() { toggle.textContent = running ? "Pause" : "Play" }
+
+function loadProgram(s) {
+  const bytes = parseHex(s)
+  mem.fill(0)
+  bytes.slice(0, TOTAL_RAM).forEach((v, i) => { mem[i] = v })
+  resetCpu()
+  running = true
+  sync()
+}
+
+function blit() {
+  for (let row = 0; row < SCREEN_HEIGHT; row++) {
+    for (let col = 0; col < BYTES_PER_ROW; col++) {
+      const b = mem[VRAM_START + row * BYTES_PER_ROW + col]
+      const o = row * SCREEN_WIDTH + col * 8
+      for (let bit = 7; bit >= 0; bit--) px[o + 7 - bit] = b >> bit & 1 ? 0xFF14FF39 : 0xFF0D0F0A
+    }
+  }
+  ctx.putImageData(img, 0, 0)
+}
+
+const INSTRUCTIONS_PER_FRAME = 8000
+
+function frame() {
+  if (running) for (let i = 0; i < INSTRUCTIONS_PER_FRAME && !halted; i++) step()
+  blit()
+  requestAnimationFrame(frame)
+}
+
+toggle.addEventListener("click", () => { running = !running; sync() })
+prog.addEventListener("change", () => loadProgram(PROGRAMS[+prog.value]))
+document.getElementById("load").addEventListener("click", () => loadProgram(hex.value))
+
+loadProgram(PROGRAMS[0])
+requestAnimationFrame(frame)
+</script>
+</body>
+</html>
