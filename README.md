@@ -18,14 +18,14 @@ HiVibe addresses this by providing a structured and modular format that keeps pr
 
 ## Current Specification Version
 
-The current version is **v0.2.1**. Starter prompt and examples are provided.
+The current version is **v0.2.2**. Starter prompt and examples are provided.
 
 Please see:  
-[Specification (v0.2.1)](versions/v0.2.1/spec.md)
+[Specification (v0.2.2)](versions/v0.2.2/spec.md)
 
 ## Experimental System Prompts
 
 Please see:  
-[HOWTO (v0.2.1)](versions/v0.2.1/HOWTO.md)
+[HOWTO (v0.2.2)](versions/v0.2.2/HOWTO.md)
 
 `Th6uD1nk`
